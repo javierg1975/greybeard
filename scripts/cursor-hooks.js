@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// ponytail — install or remove the Cursor hooks (hooks/cursor-hooks.json) in
+// greybeard — install or remove the Cursor hooks (hooks/cursor-hooks.json) in
 // ~/.cursor/hooks.json (default) or <cwd>/.cursor/hooks.json (--project),
 // merging with whatever hooks are already there. Only entries that run one of
-// ponytail's own hooks/ponytail-*.js scripts are added or removed; every other
+// greybeard's own hooks/greybeard-*.js scripts are added or removed; every other
 // hook stays as it was.
 //
 //   node scripts/cursor-hooks.js install [--project]
@@ -11,14 +11,14 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { isShellSafe } = require('../hooks/ponytail-config');
+const { isShellSafe } = require('../hooks/greybeard-config');
 
 const ROOT = path.join(__dirname, '..');
 const TEMPLATE = path.join(ROOT, 'hooks', 'cursor-hooks.json');
-const PONYTAIL_HOOK = /[\\/]hooks[\\/]ponytail-[\w-]+\.js(?=["'\s]|$)/;
+const GREYBEARD_HOOK = /[\\/]hooks[\\/]greybeard-[\w-]+\.js(?=["'\s]|$)/;
 
-function isPonytailHook(entry) {
-  return Boolean(entry && typeof entry.command === 'string' && PONYTAIL_HOOK.test(entry.command));
+function isGreybeardHook(entry) {
+  return Boolean(entry && typeof entry.command === 'string' && GREYBEARD_HOOK.test(entry.command));
 }
 
 function hooksPath(scope) {
@@ -56,28 +56,28 @@ function writeConfig(file, config) {
   fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n', 'utf8');
 }
 
-// The template's PONYTAIL_DIR placeholder becomes this checkout's absolute
+// The template's GREYBEARD_DIR placeholder becomes this checkout's absolute
 // path. Forward slashes run unchanged under cmd, PowerShell and bash, and the
 // same allowlist that guards the statusline snippet keeps shell metacharacters
 // out of the command string.
-function ponytailEntries() {
+function greybeardEntries() {
   const root = ROOT.replace(/\\/g, '/');
   if (!isShellSafe(root)) {
-    throw new Error('ponytail is checked out at a path with shell metacharacters (' + ROOT +
+    throw new Error('greybeard is checked out at a path with shell metacharacters (' + ROOT +
       '); move it, or copy hooks/cursor-hooks.json by hand and quote the path for your shell');
   }
   const template = JSON.parse(fs.readFileSync(TEMPLATE, 'utf8'));
   const hooks = {};
   for (const [event, entries] of Object.entries(template.hooks)) {
-    hooks[event] = entries.map((entry) => ({ ...entry, command: entry.command.replace(/PONYTAIL_DIR/g, root) }));
+    hooks[event] = entries.map((entry) => ({ ...entry, command: entry.command.replace(/GREYBEARD_DIR/g, root) }));
   }
   return hooks;
 }
 
-function stripPonytail(config) {
+function stripGreybeard(config) {
   for (const [event, entries] of Object.entries(config.hooks)) {
     if (!Array.isArray(entries)) continue;
-    const kept = entries.filter((entry) => !isPonytailHook(entry));
+    const kept = entries.filter((entry) => !isGreybeardHook(entry));
     if (kept.length) config.hooks[event] = kept;
     else delete config.hooks[event];
   }
@@ -87,26 +87,26 @@ function install(scope) {
   const file = hooksPath(scope);
   const config = readConfig(file);
   if (config.version === undefined) config.version = 1;
-  // Re-running replaces stale ponytail entries instead of duplicating them.
-  stripPonytail(config);
-  for (const [event, entries] of Object.entries(ponytailEntries())) {
+  // Re-running replaces stale greybeard entries instead of duplicating them.
+  stripGreybeard(config);
+  for (const [event, entries] of Object.entries(greybeardEntries())) {
     config.hooks[event] = [...(config.hooks[event] || []), ...entries];
   }
   writeConfig(file, config);
   return file;
 }
 
-// Returns the file it changed, or null when there was nothing of ponytail's in it.
+// Returns the file it changed, or null when there was nothing of greybeard's in it.
 function uninstall(scope) {
   const file = hooksPath(scope);
   if (!fs.existsSync(file)) return null;
   const config = readConfig(file);
   const before = JSON.stringify(config);
-  stripPonytail(config);
+  stripGreybeard(config);
   if (JSON.stringify(config) === before) return null;
   const otherKeys = Object.keys(config).filter((k) => k !== 'version' && k !== 'hooks');
   if (Object.keys(config.hooks).length === 0 && otherKeys.length === 0) {
-    // Only ponytail lived here: drop the file rather than leave an empty husk.
+    // Only greybeard lived here: drop the file rather than leave an empty husk.
     fs.unlinkSync(file);
   } else {
     writeConfig(file, config);
@@ -121,13 +121,13 @@ if (require.main === module) {
   try {
     if (action === 'install') {
       const file = install(scope);
-      console.log('Installed ponytail hooks in ' + file);
+      console.log('Installed greybeard hooks in ' + file);
       console.log('Cursor reloads hooks.json on save; start a new chat to activate.');
     } else if (action === 'uninstall') {
       const file = uninstall(scope);
       console.log(file
-        ? 'Removed ponytail hooks from ' + file
-        : 'No ponytail hooks in ' + hooksPath(scope));
+        ? 'Removed greybeard hooks from ' + file
+        : 'No greybeard hooks in ' + hooksPath(scope));
     } else {
       console.error('usage: node scripts/cursor-hooks.js install|uninstall [--project]');
       process.exit(1);
@@ -142,4 +142,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { hooksPath, install, isPonytailHook, uninstall };
+module.exports = { hooksPath, install, isGreybeardHook, uninstall };

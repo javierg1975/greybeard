@@ -237,7 +237,7 @@ test('the band switches between compact and details on terminal and desktop', as
   mock.clock(on)
   mock.store(on)
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ plugin: 'ponytail', surface, ...BAND })
+    const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     expect(await ui.find({ key: 'level' })).toBeDefined()
     expect(await ui.find({ key: 'board' })).toBeDefined()
     expect(await ui.find({ key: 'level-ultra' })).toBeUndefined()
@@ -258,7 +258,7 @@ test('the row takes bodyColumns only in the terminal, where a Button is as wide 
   mock.clock(on)
   mock.store(on)
   for (const [surface, width] of [['terminal', 100], ['vscode', undefined]] as const) {
-    const ui = await $.ui.mount({ plugin: 'ponytail', surface, ...BAND })
+    const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     expect((await ui.find({ type: 'Box' }))?.props.width).toBe(width)
     await ui.press({ key: 'details' })
     expect((await ui.find({ type: 'Box' }))?.props.width).toBe(width)
@@ -270,7 +270,7 @@ test('the details view has its line without empty rows, and off the terminal its
   mock.clock(on)
   mock.store(on)
   for (const surface of ['terminal', 'vscode'] as const) {
-    const ui = await $.ui.mount({ plugin: 'ponytail', surface, ...BAND })
+    const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     await ui.press({ key: 'details' })
     expect(await ui.find({ type: 'Text', text: /─/ })).toBeDefined()
     expect((await ui.find({ type: 'Box' }))?.props.gap).toBe(0)
@@ -281,23 +281,23 @@ test('the details view has its line without empty rows, and off the terminal its
     await ui.unmount()
   }
   // The desktop keeps a gap above its SVG, whose top line would otherwise touch the buttons.
-  const ui = await $.ui.mount({ plugin: 'ponytail', surface: 'desktop', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'desktop', ...BAND })
   await ui.press({ key: 'details' })
   expect((await ui.find({ type: 'Box' }))?.props.gap).toBe(1)
   await ui.unmount()
 })
 
-test('after /ponytail band the band draws nothing', async ($, on) => {
+test('after /greybeard band the band draws nothing', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }))
-  on('fs.read', ($, e, next) => (e.path === '/home/u/.claude/.ponytail-band' ? { value: 'off' } : next(e)))
+  on('fs.read', ($, e, next) => (e.path === '/home/u/.claude/.greybeard-band' ? { value: 'off' } : next(e)))
   // What Claude Code draws without the band.
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>prompt only</Text>
   })
-  const ui = await $.ui.mount({ plugin: 'ponytail', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
   expect(await ui.find({ type: 'Text', text: /prompt only/ })).toBeDefined()
   expect(await ui.find({ key: 'level' })).toBeUndefined()
   expect(await ui.find({ key: 'board' })).toBeUndefined()
@@ -310,7 +310,7 @@ for (const command of ['clear', 'resume', 'branch']) {
     mock.store(on)
     let session = 's1'
     on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }))
-    on('fs.read', ($, e, next) => (e.path === '/home/u/.claude/.ponytail-active' ? { value: 'full' } : next(e)))
+    on('fs.read', ($, e, next) => (e.path === '/home/u/.claude/.greybeard-active' ? { value: 'full' } : next(e)))
     on('session.repo', () => ({ value: { root: '/repo/shop' } }) as never)
     on('session.id', () => ({ value: session }))
     // /clear, /resume and /branch go on under another session id; /help stays in this one.
@@ -318,7 +318,7 @@ for (const command of ['clear', 'resume', 'branch']) {
       if (e.command !== 'help') session = 's2'
       return { text: '' }
     })
-    const ui = await $.ui.mount({ plugin: 'ponytail', surface: 'terminal', ...BAND })
+    const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
     await $.command.run({ command: 'help', args: '' })
     expect(await ui.find({ key: 'level', text: /full/ })).toBeUndefined()
     await $.command.run({ command, args: '' })
@@ -327,7 +327,7 @@ for (const command of ['clear', 'resume', 'branch']) {
   })
 }
 
-test("another plugin's command runs without the band's hook, so its output is not labelled ponytail", async ($, on) => {
+test("another plugin's command runs without the band's hook, so its output is not labelled greybeard", async ($, on) => {
   let reads = 0
   on('session.id', () => (reads++, { value: 's1' }))
   on('command.run', () => ({ text: '' }))
@@ -365,8 +365,8 @@ test('the ledger is written on Windows, where there is no mkdir', async ($, on) 
   expect(JSON.stringify(status)).not.toContain('could not write the task ledger')
   // Off Windows a C: path is relative, so the working dir comes in front of it: compare the end.
   expect(written.length).toBe(2)
-  expect(written[0]?.endsWith('C:/Users/u/.config/ponytail/band/shop.csv')).toBe(true)
-  expect(written[1]?.endsWith('C:/Users/u/.config/ponytail/band/board.html')).toBe(true)
+  expect(written[0]?.endsWith('C:/Users/u/.config/greybeard/band/shop.csv')).toBe(true)
+  expect(written[1]?.endsWith('C:/Users/u/.config/greybeard/band/board.html')).toBe(true)
 })
 
 test('the transcript is found with no classic hook, in its named folder or any other', async ($, on) => {
@@ -425,14 +425,14 @@ test('without HOME (Windows) the band reads its flags under USERPROFILE', async 
   const reads: string[] = []
   on('fs.read', ($, e, next) => {
     reads.push(e.path.replaceAll('\\', '/'))
-    return reads.at(-1)?.endsWith('C:/Users/u/.claude/.ponytail-band') ? { value: 'off' } : next(e)
+    return reads.at(-1)?.endsWith('C:/Users/u/.claude/.greybeard-band') ? { value: 'off' } : next(e)
   })
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>prompt only</Text>
   })
-  const ui = await $.ui.mount({ plugin: 'ponytail', surface: 'terminal', ...BAND })
-  expect(reads.some(path => path.endsWith('C:/Users/u/.claude/.ponytail-band'))).toBe(true)
+  const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
+  expect(reads.some(path => path.endsWith('C:/Users/u/.claude/.greybeard-band'))).toBe(true)
   expect(await ui.find({ key: 'level' })).toBeUndefined()
   await ui.unmount()
 })
@@ -440,13 +440,13 @@ test('without HOME (Windows) the band reads its flags under USERPROFILE', async 
 test('another mod drawing above the prompt shows below the band, in compact and in details', async ($, on) => {
   mock.clock(on)
   mock.store(on)
-  // Another mod in the same slot, beneath ponytail in the chain.
+  // Another mod in the same slot, beneath greybeard in the chain.
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>other band</Text>
   })
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ plugin: 'ponytail', surface, ...BAND })
+    const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     expect(await ui.find({ key: 'level' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /other band/ })).toBeDefined()
 
@@ -467,17 +467,17 @@ test('review and audit run the same commands a person types', async ($, on) => {
     sent.push(`/${e.command} ${e.args}`.trim())
     return { text: '' }
   })
-  const ui = await $.ui.mount({ plugin: 'ponytail', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
   // The level pill opens the four levels instead of switching: no command, no turn.
   await ui.press({ key: 'level' })
   expect(await ui.find({ key: 'level-ultra' })).toBeDefined()
   expect(sent).toEqual([])
   await ui.press({ key: 'level-lite' })
-  expect(sent).toEqual(['/ponytail:ponytail lite'])
+  expect(sent).toEqual(['/greybeard:greybeard lite'])
   sent.length = 0
   await ui.press({ key: 'review' })
   await ui.press({ key: 'audit' })
-  expect(sent).toEqual(['/ponytail:ponytail-review', '/ponytail:ponytail-audit'])
+  expect(sent).toEqual(['/greybeard:greybeard-review', '/greybeard:greybeard-audit'])
   await ui.unmount()
 })
 
@@ -490,7 +490,7 @@ test('copy hands the task to the clipboard as Markdown', async ($, on) => {
     return { value: { isCopied: true as const } }
   })
   on('ui.toast', () => ({ value: undefined }))
-  const ui = await $.ui.mount({ plugin: 'ponytail', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
   await ui.press({ key: 'details' })
   expect(await ui.find({ key: 'task' })).toBeUndefined()
   await ui.press({ key: 'copy' })
@@ -505,7 +505,7 @@ test('a test run shows its count, and an edit in the project after it marks the 
   on('session.repo', () => ({ value: { root: '/repo' } }) as never)
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ℹ pass 14', stderr: '', interrupted: false }, text: 'ℹ pass 14' }) as never)
   on('tool.call', { tool: 'Edit' }, () => ({ result: {}, text: 'ok' }) as never)
-  const ui = await $.ui.mount({ plugin: 'ponytail', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
 
   await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
   expect(await ui.find({ type: 'Text', text: /✓ 14 tests/ })).toBeDefined()

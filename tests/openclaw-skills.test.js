@@ -24,3 +24,14 @@ for (const name of NAMES) {
     assert.ok(d.length <= 160 && !d.includes('\n'), 'description too long or multiline');
   });
 }
+
+test('greybeard: profiles and scripts ship next to the OpenClaw skill, verbatim', () => {
+  const path = require('path');
+  for (const dir of ['references', 'scripts']) {
+    const src = path.join(__dirname, '..', 'skills', 'greybeard', dir);
+    for (const f of fs.readdirSync(src)) {
+      const copy = path.join(path.dirname(outPath('greybeard')), dir, f);
+      assert.equal(fs.readFileSync(copy, 'utf8'), fs.readFileSync(path.join(src, f), 'utf8'), 'stale: ' + f);
+    }
+  }
+});

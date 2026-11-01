@@ -11,19 +11,19 @@ const {
   normalizePersistedMode,
   isDeactivationCommand,
   writeDefaultMode,
-} = require("../hooks/ponytail-config.js");
-const { getPonytailInstructions, filterSkillBodyForMode } = require("../hooks/ponytail-instructions.js");
+} = require("../hooks/greybeard-config.js");
+const { getGreybeardInstructions, filterSkillBodyForMode } = require("../hooks/greybeard-instructions.js");
 
 export { filterSkillBodyForMode };
 export const readDefaultMode = getDefaultMode;
 export const readQuietStartup = getQuietStartup;
 
 const RUNTIME_MODE_LIST = RUNTIME_MODES.join("|");
-const PONYTAIL_COMMAND_DESCRIPTION = `Set mode: ${RUNTIME_MODE_LIST}. Commands: status, default <mode>`;
+const GREYBEARD_COMMAND_DESCRIPTION = `Set mode: ${RUNTIME_MODE_LIST}. Commands: status, default <mode>`;
 
 // Every item is a complete command: pi submits on Enter, so a bare "default" would run without a mode.
 // Values only: per-level descriptions would be a second copy of the Levels table in SKILL.md.
-export function completePonytailArgs(prefix) {
+export function completeGreybeardArgs(prefix) {
   const typed = String(prefix || "").trimStart();
   const values = [...RUNTIME_MODES, "status", ...RUNTIME_MODES.map((m) => `default ${m}`)].filter((v) => v.startsWith(typed));
   return values.length ? values.map((value) => ({ value, label: value })) : null;
@@ -35,7 +35,7 @@ export function resolveSessionMode(entries, fallbackMode = DEFAULT_MODE) {
 
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i];
-    if (entry?.type !== "custom" || entry?.customType !== "ponytail-mode") continue;
+    if (entry?.type !== "custom" || entry?.customType !== "greybeard-mode") continue;
 
     const mode = normalizePersistedMode(entry?.data?.mode);
     if (mode) return mode;
@@ -44,12 +44,12 @@ export function resolveSessionMode(entries, fallbackMode = DEFAULT_MODE) {
   return fallback;
 }
 
-export function parsePonytailCommand(text, defaultMode = DEFAULT_MODE, currentMode = null) {
+export function parseGreybeardCommand(text, defaultMode = DEFAULT_MODE, currentMode = null) {
   const fallback = normalizePersistedMode(defaultMode) || DEFAULT_MODE;
   const normalizedText = String(text || "").trim().toLowerCase();
 
   if (!normalizedText) {
-    // Bare /ponytail switches ponytail on, or reports the level when it already is (#639).
+    // Bare /greybeard switches greybeard on, or reports the level when it already is (#639).
     if (currentMode && currentMode !== "off") return { type: "status" };
     return { type: "set-mode", mode: fallback === "off" ? "full" : fallback };
   }
@@ -59,7 +59,7 @@ export function parsePonytailCommand(text, defaultMode = DEFAULT_MODE, currentMo
   if (primary === "status") return { type: "status" };
 
   if (primary === "default") {
-    // ponytail: a default must be a runtime level; review is session-only (#377).
+    // greybeard: a default must be a runtime level; review is session-only (#377).
     const mode = normalizeMode(secondary);
     return mode ? { type: "set-default", mode } : { type: "invalid", reason: "invalid-default-mode" };
   }
@@ -70,7 +70,7 @@ export function parsePonytailCommand(text, defaultMode = DEFAULT_MODE, currentMo
 
 export { writeDefaultMode };
 
-export default function ponytailExtension(pi) {
+export default function greybeardExtension(pi) {
   let currentMode = DEFAULT_MODE;
   let configuredDefaultMode = getDefaultMode();
   let hideStatus = getHideStatus();
@@ -81,21 +81,21 @@ export default function ponytailExtension(pi) {
   function syncStatus(ctx) {
     if (ctx) lastCtx = ctx;
     const c = ctx || lastCtx;
-    // ponytail: hide the indicator but keep the ruleset active (#324).
+    // greybeard: hide the indicator but keep the ruleset active (#324).
     if (hideStatus) return;
     if (!c?.ui?.setStatus) return;
-    // ponytail: try/catch guards against pi-web theme proxy throwing before initTheme
+    // greybeard: try/catch guards against pi-web theme proxy throwing before initTheme
     let theme;
     try { theme = c.ui.theme; if (!theme?.fg) return; } catch { return; }
     if (currentMode === "off") {
-      c.ui.setStatus("ponytail", undefined);
+      c.ui.setStatus("greybeard", undefined);
       return;
     }
     const levelIcons = { lite: "🌿", full: "⚡", ultra: "🔥" };
     const icon = levelIcons[currentMode] || "";
     const label = currentMode.toUpperCase();
     const indicator = isActive ? theme.fg("accent", "●") : theme.fg("dim", "○");
-    c.ui.setStatus("ponytail", indicator + " 🐴 " + theme.fg("muted", "ponytail: ") + theme.fg("text", icon + " " + label));
+    c.ui.setStatus("greybeard", indicator + " 🐴 " + theme.fg("muted", "greybeard: ") + theme.fg("text", icon + " " + label));
   }
 
   const setMode = (mode, ctx) => {
@@ -103,9 +103,9 @@ export default function ponytailExtension(pi) {
     if (!normalized) return;
 
     currentMode = normalized;
-    pi.appendEntry("ponytail-mode", { mode: normalized });
+    pi.appendEntry("greybeard-mode", { mode: normalized });
     syncStatus(ctx);
-    ctx?.ui?.notify?.(`Ponytail mode set to ${normalized}.`, "info");
+    ctx?.ui?.notify?.(`Greybeard mode set to ${normalized}.`, "info");
   };
 
   const sendAlias = (skillName, args, ctx) => {
@@ -114,7 +114,7 @@ export default function ponytailExtension(pi) {
 
     // pi.sendUserMessage does not expand skill commands on its own, so without
     // expandPromptTemplates the alias lands as the literal text
-    // "/skill:ponytail-review" and the skill body never reaches the agent.
+    // "/skill:greybeard-review" and the skill body never reaches the agent.
     if (ctx?.isIdle?.() === false) {
       pi.sendUserMessage(message, { expandPromptTemplates: true, deliverAs: "followUp" });
       ctx?.ui?.notify?.(`${skillName} queued as follow-up.`, "info");
@@ -124,14 +124,14 @@ export default function ponytailExtension(pi) {
     pi.sendUserMessage(message, { expandPromptTemplates: true });
   };
 
-  pi.registerCommand("ponytail", {
-    description: PONYTAIL_COMMAND_DESCRIPTION,
-    getArgumentCompletions: (prefix) => completePonytailArgs(prefix),
+  pi.registerCommand("greybeard", {
+    description: GREYBEARD_COMMAND_DESCRIPTION,
+    getArgumentCompletions: (prefix) => completeGreybeardArgs(prefix),
     handler: async (args, ctx) => {
-      const parsed = parsePonytailCommand(args, configuredDefaultMode, currentMode);
+      const parsed = parseGreybeardCommand(args, configuredDefaultMode, currentMode);
 
       if (parsed.type === "status") {
-        ctx?.ui?.notify?.(`Ponytail: current ${currentMode} • default ${configuredDefaultMode}`, "info");
+        ctx?.ui?.notify?.(`Greybeard: current ${currentMode} • default ${configuredDefaultMode}`, "info");
         return;
       }
 
@@ -141,7 +141,7 @@ export default function ponytailExtension(pi) {
           if (written) {
             configuredDefaultMode = getDefaultMode();
             const message = configuredDefaultMode === written
-              ? `Default Ponytail mode set to ${written}.`
+              ? `Default Greybeard mode set to ${written}.`
               : `Saved default ${written}, but env override keeps default at ${configuredDefaultMode}.`;
             ctx?.ui?.notify?.(message, "info");
           }
@@ -156,33 +156,33 @@ export default function ponytailExtension(pi) {
         return;
       }
 
-      ctx?.ui?.notify?.("Unknown or unsupported /ponytail mode.", "warning");
+      ctx?.ui?.notify?.("Unknown or unsupported /greybeard mode.", "warning");
     },
   });
 
-  pi.registerCommand("ponytail-review", {
-    description: "Run /skill:ponytail-review",
-    handler: (args, ctx) => sendAlias("/skill:ponytail-review", args, ctx),
+  pi.registerCommand("greybeard-review", {
+    description: "Run /skill:greybeard-review",
+    handler: (args, ctx) => sendAlias("/skill:greybeard-review", args, ctx),
   });
 
-  pi.registerCommand("ponytail-audit", {
-    description: "Run /skill:ponytail-audit",
-    handler: (args, ctx) => sendAlias("/skill:ponytail-audit", args, ctx),
+  pi.registerCommand("greybeard-audit", {
+    description: "Run /skill:greybeard-audit",
+    handler: (args, ctx) => sendAlias("/skill:greybeard-audit", args, ctx),
   });
 
-  pi.registerCommand("ponytail-gain", {
-    description: "Run /skill:ponytail-gain",
-    handler: (args, ctx) => sendAlias("/skill:ponytail-gain", args, ctx),
+  pi.registerCommand("greybeard-gain", {
+    description: "Run /skill:greybeard-gain",
+    handler: (args, ctx) => sendAlias("/skill:greybeard-gain", args, ctx),
   });
 
-  pi.registerCommand("ponytail-debt", {
-    description: "Run /skill:ponytail-debt",
-    handler: (args, ctx) => sendAlias("/skill:ponytail-debt", args, ctx),
+  pi.registerCommand("greybeard-debt", {
+    description: "Run /skill:greybeard-debt",
+    handler: (args, ctx) => sendAlias("/skill:greybeard-debt", args, ctx),
   });
 
-  pi.registerCommand("ponytail-help", {
-    description: "Run /skill:ponytail-help",
-    handler: (args, ctx) => sendAlias("/skill:ponytail-help", args, ctx),
+  pi.registerCommand("greybeard-help", {
+    description: "Run /skill:greybeard-help",
+    handler: (args, ctx) => sendAlias("/skill:greybeard-help", args, ctx),
   });
 
   pi.on("input", async (event, ctx) => {
@@ -205,7 +205,7 @@ export default function ponytailExtension(pi) {
     hideStatus = getHideStatus();
     restoreSessionMode(ctx);
     if (!getQuietStartup()) {
-      ctx?.ui?.notify?.(`Ponytail loaded: ${currentMode}`, "info");
+      ctx?.ui?.notify?.(`Greybeard loaded: ${currentMode}`, "info");
     }
   });
 
@@ -230,16 +230,16 @@ export default function ponytailExtension(pi) {
   pi.on("before_agent_start", async (event) => {
     if (!currentMode || currentMode === "off") {
       // Clear a stale section when the mode is off so a previous turn does not linger (#953).
-      if (event?.systemPromptOptions?.sections) delete event.systemPromptOptions.sections.ponytail;
+      if (event?.systemPromptOptions?.sections) delete event.systemPromptOptions.sections.greybeard;
       return;
     }
-    const instructions = getPonytailInstructions(currentMode);
+    const instructions = getGreybeardInstructions(currentMode);
     // Prefer structured sections so Pi can keep the cached prefix when other
     // extensions change their own section (#953). Fall back to replacement
     // for older Pi versions without systemPromptOptions.sections.
     const sections = event?.systemPromptOptions?.sections;
     if (sections && typeof sections === "object") {
-      sections.ponytail = instructions;
+      sections.greybeard = instructions;
       return;
     }
     // OMP passes the system prompt as an array of parts; keep it one (#776).

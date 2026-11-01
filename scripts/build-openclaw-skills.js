@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Generate the OpenClaw / ClawHub skill package (.openclaw/skills/) from the
 // canonical skills/. OpenClaw skills are SKILL.md (frontmatter + body), the same
-// format ponytail already uses, with one difference: `description` must be a
+// format greybeard already uses, with one difference: `description` must be a
 // single line under 160 chars. The canonical descriptions are long (tuned for
 // Claude's skill picker), so each ships a short one here. The body is copied
 // verbatim from skills/<name>/SKILL.md so the ruleset never drifts; only the
@@ -14,15 +14,15 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const HOMEPAGE = 'https://github.com/DietrichGebert/ponytail';
+const HOMEPAGE = 'https://github.com/javierg1975/greybeard';
 
 const DESCRIPTIONS = {
-  'ponytail': 'Lazy senior dev mode for any coding task: the smallest change that fully solves it, and a reply a busy human understands in one read.',
-  'ponytail-review': 'Quality review of a diff: bugs, security, real load, missing tests, speed, and what to delete. Each finding says what goes wrong and how to fix it.',
-  'ponytail-audit': 'Quality audit of the whole repo: bugs, security, real load, missing tests, speed, and what to delete. Most important first.',
-  'ponytail-debt': 'Harvest every shortcut: comment into one debt ledger, so deferrals get tracked instead of forgotten. One-shot report.',
-  'ponytail-gain': 'Show ponytail measured impact as a scoreboard: less code, less cost, more speed, from the agentic benchmark averages. One-shot display.',
-  'ponytail-help': "Quick reference for ponytail's modes, skills, and commands. One-shot display.",
+  'greybeard': 'Lazy senior dev mode for any coding task: the smallest change that fully solves it, and a reply a busy human understands in one read.',
+  'greybeard-review': 'Quality review of a diff: bugs, security, real load, missing tests, speed, and what to delete. Each finding says what goes wrong and how to fix it.',
+  'greybeard-audit': 'Quality audit of the whole repo: bugs, security, real load, missing tests, speed, and what to delete. Most important first.',
+  'greybeard-debt': 'Harvest every shortcut: comment into one debt ledger, so deferrals get tracked instead of forgotten. One-shot report.',
+  'greybeard-gain': 'Show greybeard measured impact as a scoreboard: less code, less cost, more speed, from the agentic benchmark averages. One-shot display.',
+  'greybeard-help': "Quick reference for greybeard's modes, skills, and commands. One-shot display.",
 };
 
 const NAMES = Object.keys(DESCRIPTIONS);
@@ -56,5 +56,10 @@ if (require.main === module) {
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, render(name));
     console.log('wrote', path.relative(ROOT, p).replace(/\\/g, '/'));
+    // Profiles and scripts the skill body points at ship next to it.
+    for (const dir of ['references', 'scripts']) {
+      const src = path.join(ROOT, 'skills', name, dir);
+      if (fs.existsSync(src)) fs.cpSync(src, path.join(path.dirname(p), dir), { recursive: true });
+    }
   }
 }

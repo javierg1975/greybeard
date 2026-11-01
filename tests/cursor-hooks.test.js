@@ -19,19 +19,19 @@ const { spawnSync } = require('child_process');
 const root = path.join(__dirname, '..');
 const rootFwd = root.replace(/\\/g, '/');
 const TEMPLATE = 'hooks/cursor-hooks.json';
-const { isPonytailHook } = require('../scripts/cursor-hooks');
+const { isGreybeardHook } = require('../scripts/cursor-hooks');
 
 // Keep host detection and config resolution deterministic whatever shell the
 // suite runs in (a Cursor hook env, a Codex shell, a machine-wide default mode).
 for (const key of [
   'CURSOR_VERSION', 'CURSOR_PROJECT_DIR', 'CLAUDE_PROJECT_DIR', 'CLAUDE_PLUGIN_ROOT',
   'CLAUDE_CONFIG_DIR', 'PLUGIN_DATA', 'COPILOT_PLUGIN_DATA', 'QODER_SESSION_ID',
-  'PONYTAIL_SUBAGENT_MATCHER', 'PONYTAIL_DEFAULT_MODE', 'XDG_CONFIG_HOME',
+  'GREYBEARD_SUBAGENT_MATCHER', 'GREYBEARD_DEFAULT_MODE', 'XDG_CONFIG_HOME',
 ]) {
   delete process.env[key];
 }
 
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponytail-cursor-'));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'greybeard-cursor-'));
 process.on('exit', () => fs.rmSync(temp, { recursive: true, force: true }));
 
 function run(script, env, input = '', cwd = undefined) {
@@ -68,7 +68,7 @@ function cursorEnv(name, extra = {}) {
   return {
     home,
     project,
-    flag: path.join(home, '.cursor', '.ponytail-active'),
+    flag: path.join(home, '.cursor', '.greybeard-active'),
     env: {
       HOME: home,
       USERPROFILE: home,
@@ -90,15 +90,15 @@ test('cursor hooks template is a valid hooks.json with the two events that can i
   const config = JSON.parse(fs.readFileSync(path.join(root, TEMPLATE), 'utf8'));
   assert.equal(config.version, 1);
   assert.deepEqual(Object.keys(config.hooks).sort(), ['beforeSubmitPrompt', 'sessionStart']);
-  assert.match(config.hooks.sessionStart[0].command, /ponytail-activate\.js/);
-  assert.match(config.hooks.beforeSubmitPrompt[0].command, /ponytail-mode-tracker\.js/);
+  assert.match(config.hooks.sessionStart[0].command, /greybeard-activate\.js/);
+  assert.match(config.hooks.beforeSubmitPrompt[0].command, /greybeard-mode-tracker\.js/);
   // subagentStart answers only permission/user_message in Cursor, so it must
   // not be registered: it would cost a process per subagent and inject nothing.
   assert.equal(config.hooks.subagentStart, undefined);
   for (const entries of Object.values(config.hooks)) {
     assert.ok(Array.isArray(entries) && entries.length === 1);
     for (const entry of entries) {
-      assert.match(entry.command, /^node "PONYTAIL_DIR\/hooks\/ponytail-[\w-]+\.js"$/, 'plain node call, quoted absolute path');
+      assert.match(entry.command, /^node "GREYBEARD_DIR\/hooks\/greybeard-[\w-]+\.js"$/, 'plain node call, quoted absolute path');
       assert.doesNotMatch(entry.command, /(^|\s)exec\s|&&|\|\|/, 'must run under cmd, PowerShell and bash alike');
       assert.equal(typeof entry.timeout, 'number');
       const script = entry.command.match(/hooks\/([\w.-]+\.js)/)[1];
@@ -107,27 +107,27 @@ test('cursor hooks template is a valid hooks.json with the two events that can i
   }
 });
 
-test('hook detection ignores later lookalike arguments after a real ponytail hook', () => {
-  assert.equal(isPonytailHook({
-    command: 'node "/opt/p/hooks/ponytail-activate.js" --log /tmp/hooks/ponytail-x/',
+test('hook detection ignores later lookalike arguments after a real greybeard hook', () => {
+  assert.equal(isGreybeardHook({
+    command: 'node "/opt/p/hooks/greybeard-activate.js" --log /tmp/hooks/greybeard-x/',
   }), true);
 });
 
 test('isCursor is off outside a Cursor hook process', () => {
-  const { isCursor } = require('../hooks/ponytail-runtime');
+  const { isCursor } = require('../hooks/greybeard-runtime');
   assert.equal(isCursor, false);
 });
 
 test('sessionStart injects the default-level ruleset as additional_context and keeps state under ~/.cursor', () => {
-  const c = cursorEnv('start', { PONYTAIL_DEFAULT_MODE: 'ultra' });
+  const c = cursorEnv('start', { GREYBEARD_DEFAULT_MODE: 'ultra' });
   const input = JSON.stringify({
     hook_event_name: 'sessionStart', conversation_id: 'conv-1', session_id: 'conv-1',
     is_background_agent: false, composer_mode: 'agent', workspace_roots: [c.project],
     cursor_version: '3.20.17', model: 'claude-opus-4-7-thinking-max',
   });
-  const output = parse(run('ponytail-activate.js', c.env, input));
+  const output = parse(run('greybeard-activate.js', c.env, input));
   assert.deepEqual(Object.keys(output), ['additional_context']);
-  assert.match(output.additional_context, /^PONYTAIL MODE ACTIVE — level: ultra/);
+  assert.match(output.additional_context, /^GREYBEARD MODE ACTIVE — level: ultra/);
   assert.match(output.additional_context, /Also question the request/, 'ultra row must survive the level filter');
   assert.doesNotMatch(output.additional_context, /Build what was asked/, 'lite row must be filtered out');
   assert.doesNotMatch(output.additional_context, /STATUSLINE SETUP NEEDED/, 'Cursor has no Claude statusline to nudge about');
@@ -136,96 +136,96 @@ test('sessionStart injects the default-level ruleset as additional_context and k
 });
 
 test('sessionStart in off mode emits nothing and writes no flag', () => {
-  const c = cursorEnv('off', { PONYTAIL_DEFAULT_MODE: 'off' });
-  const result = run('ponytail-activate.js', c.env);
+  const c = cursorEnv('off', { GREYBEARD_DEFAULT_MODE: 'off' });
+  const result = run('greybeard-activate.js', c.env);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, '', 'empty stdout is a no-op for Cursor; "OK" would be a JSON parse error');
   assert.equal(fs.existsSync(c.flag), false);
 });
 
 test('Cursor running a Claude-format plugin (CLAUDE_PLUGIN_ROOT set) still gets Cursor JSON', () => {
-  const c = cursorEnv('plugin', { PONYTAIL_DEFAULT_MODE: 'full' });
-  const pluginRoot = path.join(c.home, '.cursor', 'plugins', 'ponytail');
+  const c = cursorEnv('plugin', { GREYBEARD_DEFAULT_MODE: 'full' });
+  const pluginRoot = path.join(c.home, '.cursor', 'plugins', 'greybeard');
   c.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
   c.env.CURSOR_PLUGIN_ROOT = pluginRoot;
-  const output = parse(run('ponytail-activate.js', c.env));
-  assert.match(output.additional_context, /^PONYTAIL MODE ACTIVE — level: full/);
+  const output = parse(run('greybeard-activate.js', c.env));
+  assert.match(output.additional_context, /^GREYBEARD MODE ACTIVE — level: full/);
   assert.equal(fs.readFileSync(c.flag, 'utf8'), 'full');
 });
 
-test('beforeSubmitPrompt tracks /ponytail commands and delivers the new level ruleset', () => {
-  const c = cursorEnv('switch', { PONYTAIL_DEFAULT_MODE: 'full' });
+test('beforeSubmitPrompt tracks /greybeard commands and delivers the new level ruleset', () => {
+  const c = cursorEnv('switch', { GREYBEARD_DEFAULT_MODE: 'full' });
   writeFlag(c, 'full');
 
-  const sw = parse(run('ponytail-mode-tracker.js', c.env, JSON.stringify({
+  const sw = parse(run('greybeard-mode-tracker.js', c.env, JSON.stringify({
     hook_event_name: 'beforeSubmitPrompt', conversation_id: 'conv-1',
-    prompt: '/ponytail lite', attachments: [],
+    prompt: '/greybeard lite', attachments: [],
   })));
   assert.equal(sw.continue, true, 'must never block the prompt');
   assert.equal(sw.user_message, undefined, 'Cursor shows user_message only for blocked prompts');
-  assert.match(sw.additional_context, /^PONYTAIL MODE CHANGED — level: lite/);
-  assert.match(sw.additional_context, /Build what was asked/, 'Cursor has no /ponytail command, so the level ruleset rides along');
+  assert.match(sw.additional_context, /^GREYBEARD MODE CHANGED — level: lite/);
+  assert.match(sw.additional_context, /Build what was asked/, 'Cursor has no /greybeard command, so the level ruleset rides along');
   assert.doesNotMatch(sw.additional_context, /Also question the request/);
   assert.equal(fs.readFileSync(c.flag, 'utf8'), 'lite');
 
-  // Bare /ponytail reports the live level without resetting it.
-  const report = parse(run('ponytail-mode-tracker.js', c.env, JSON.stringify({ prompt: '/ponytail' })));
-  assert.deepEqual(report, { continue: true, additional_context: 'PONYTAIL MODE ACTIVE — level: lite' });
+  // Bare /greybeard reports the live level without resetting it.
+  const report = parse(run('greybeard-mode-tracker.js', c.env, JSON.stringify({ prompt: '/greybeard' })));
+  assert.deepEqual(report, { continue: true, additional_context: 'GREYBEARD MODE ACTIVE — level: lite' });
   assert.equal(fs.readFileSync(c.flag, 'utf8'), 'lite');
 
-  // /ponytail default persists the default without touching the session level.
-  const def = parse(run('ponytail-mode-tracker.js', c.env, JSON.stringify({ prompt: '/ponytail default ultra' })));
+  // /greybeard default persists the default without touching the session level.
+  const def = parse(run('greybeard-mode-tracker.js', c.env, JSON.stringify({ prompt: '/greybeard default ultra' })));
   assert.equal(def.continue, true);
-  assert.match(def.additional_context, /PONYTAIL DEFAULT SET — new sessions start in ultra/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(c.home, '.config', 'ponytail', 'config.json'), 'utf8')).defaultMode, 'ultra');
+  assert.match(def.additional_context, /GREYBEARD DEFAULT SET — new sessions start in ultra/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(c.home, '.config', 'greybeard', 'config.json'), 'utf8')).defaultMode, 'ultra');
   assert.equal(fs.readFileSync(c.flag, 'utf8'), 'lite');
 
-  // /ponytail off and the plain-language deactivations clear the flag and tell the model.
-  const off = parse(run('ponytail-mode-tracker.js', c.env, JSON.stringify({ prompt: '/ponytail off' })));
-  assert.deepEqual(off, { continue: true, additional_context: 'PONYTAIL MODE OFF' });
+  // /greybeard off and the plain-language deactivations clear the flag and tell the model.
+  const off = parse(run('greybeard-mode-tracker.js', c.env, JSON.stringify({ prompt: '/greybeard off' })));
+  assert.deepEqual(off, { continue: true, additional_context: 'GREYBEARD MODE OFF' });
   assert.equal(fs.existsSync(c.flag), false);
 
   writeFlag(c, 'full');
-  const stop = parse(run('ponytail-mode-tracker.js', c.env, JSON.stringify({ prompt: 'Stop ponytail.' })));
-  assert.equal(stop.additional_context, 'PONYTAIL MODE OFF');
+  const stop = parse(run('greybeard-mode-tracker.js', c.env, JSON.stringify({ prompt: 'Stop greybeard.' })));
+  assert.equal(stop.additional_context, 'GREYBEARD MODE OFF');
   assert.equal(fs.existsSync(c.flag), false);
 
   // Ordinary prompts produce no output at all: Cursor treats empty stdout as "carry on".
   writeFlag(c, 'full');
-  const plain = run('ponytail-mode-tracker.js', c.env, JSON.stringify({ prompt: 'add a normal mode toggle next to dark mode' }));
+  const plain = run('greybeard-mode-tracker.js', c.env, JSON.stringify({ prompt: 'add a normal mode toggle next to dark mode' }));
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(plain.stdout, '');
-  assert.equal(fs.readFileSync(c.flag, 'utf8'), 'full', 'incidental "normal mode" must not turn ponytail off');
+  assert.equal(fs.readFileSync(c.flag, 'utf8'), 'full', 'incidental "normal mode" must not turn greybeard off');
 });
 
 test('with the always-on rule in the workspace the hooks step back instead of duplicating the ruleset', () => {
-  const c = cursorEnv('rule', { PONYTAIL_DEFAULT_MODE: 'full' });
-  const rule = path.join(c.project, '.cursor', 'rules', 'ponytail.mdc');
+  const c = cursorEnv('rule', { GREYBEARD_DEFAULT_MODE: 'full' });
+  const rule = path.join(c.project, '.cursor', 'rules', 'greybeard.mdc');
   fs.mkdirSync(path.dirname(rule), { recursive: true });
-  fs.copyFileSync(path.join(root, '.cursor', 'rules', 'ponytail.mdc'), rule);
+  fs.copyFileSync(path.join(root, '.cursor', 'rules', 'greybeard.mdc'), rule);
 
-  const start = parse(run('ponytail-activate.js', c.env));
+  const start = parse(run('greybeard-activate.js', c.env));
   assert.match(start.additional_context, /always-on Cursor rule/);
   assert.ok(start.additional_context.includes(rule), 'notice must name the rule file');
-  assert.doesNotMatch(start.additional_context, /PONYTAIL MODE ACTIVE/, 'no second copy of the ruleset');
+  assert.doesNotMatch(start.additional_context, /GREYBEARD MODE ACTIVE/, 'no second copy of the ruleset');
   assert.equal(fs.existsSync(c.flag), false, 'no mode flag while the rule owns the ruleset');
 
-  for (const prompt of ['/ponytail ultra', '/ponytail off', 'normal mode', '/ponytail']) {
-    const out = parse(run('ponytail-mode-tracker.js', c.env, JSON.stringify({ prompt })));
+  for (const prompt of ['/greybeard ultra', '/greybeard off', 'normal mode', '/greybeard']) {
+    const out = parse(run('greybeard-mode-tracker.js', c.env, JSON.stringify({ prompt })));
     assert.equal(out.continue, true);
     assert.match(out.additional_context, /always-on Cursor rule/, `${prompt} must answer with the rule notice`);
-    assert.doesNotMatch(out.additional_context, /PONYTAIL MODE (CHANGED|OFF|ACTIVE)/);
+    assert.doesNotMatch(out.additional_context, /GREYBEARD MODE (CHANGED|OFF|ACTIVE)/);
     assert.equal(fs.existsSync(c.flag), false);
   }
 
-  const plain = run('ponytail-mode-tracker.js', c.env, JSON.stringify({ prompt: 'hello' }));
+  const plain = run('greybeard-mode-tracker.js', c.env, JSON.stringify({ prompt: 'hello' }));
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(plain.stdout, '', 'ordinary prompts stay silent');
 
   // Project hooks run from the workspace root: the cwd fallback must find the rule too.
   delete c.env.CURSOR_PROJECT_DIR;
   delete c.env.CLAUDE_PROJECT_DIR;
-  const viaCwd = parse(run('ponytail-activate.js', c.env, '', c.project));
+  const viaCwd = parse(run('greybeard-activate.js', c.env, '', c.project));
   assert.match(viaCwd.additional_context, /always-on Cursor rule/);
 });
 
@@ -238,7 +238,7 @@ test('installer merges into an existing ~/.cursor/hooks.json and leaves unrelate
     hooks: {
       sessionStart: [{ command: './hooks/their-session.sh' }],
       afterFileEdit: [{ command: './hooks/format.sh', matcher: 'Write' }],
-      stop: [{ command: 'node "./hooks/my-ponytail-logger.js"' }],
+      stop: [{ command: 'node "./hooks/my-greybeard-logger.js"' }],
     },
   };
   fs.writeFileSync(file, JSON.stringify(theirs));
@@ -252,23 +252,23 @@ test('installer merges into an existing ~/.cursor/hooks.json and leaves unrelate
   assert.deepEqual(config.hooks.stop, theirs.hooks.stop, 'similarly named user hook must survive install');
   assert.equal(config.hooks.sessionStart[0].command, './hooks/their-session.sh', 'their sessionStart hook stays first and intact');
   assert.equal(config.hooks.sessionStart.length, 2);
-  assert.deepEqual(config.hooks.sessionStart[1], { command: `node "${rootFwd}/hooks/ponytail-activate.js"`, timeout: 15 });
-  assert.deepEqual(config.hooks.beforeSubmitPrompt, [{ command: `node "${rootFwd}/hooks/ponytail-mode-tracker.js"`, timeout: 15 }]);
+  assert.deepEqual(config.hooks.sessionStart[1], { command: `node "${rootFwd}/hooks/greybeard-activate.js"`, timeout: 15 });
+  assert.deepEqual(config.hooks.beforeSubmitPrompt, [{ command: `node "${rootFwd}/hooks/greybeard-mode-tracker.js"`, timeout: 15 }]);
 
-  // Idempotent: a second install replaces ponytail's entries, never duplicates them.
+  // Idempotent: a second install replaces greybeard's entries, never duplicates them.
   result = cli(['install'], env);
   assert.equal(result.status, 0, result.stderr);
   config = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(config.hooks.sessionStart.length, 2);
   assert.equal(config.hooks.beforeSubmitPrompt.length, 1);
 
-  // Uninstall removes only ponytail's entries.
+  // Uninstall removes only greybeard's entries.
   result = cli(['uninstall'], env);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), theirs);
 });
 
-test('installer creates the file when absent and removes it again when only ponytail lived there', () => {
+test('installer creates the file when absent and removes it again when only greybeard lived there', () => {
   const home = path.join(temp, 'fresh', 'home');
   fs.mkdirSync(home, { recursive: true });
   const env = { HOME: home, USERPROFILE: home };
@@ -276,7 +276,7 @@ test('installer creates the file when absent and removes it again when only pony
 
   let result = cli(['install'], env);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Installed ponytail hooks in /);
+  assert.match(result.stdout, /Installed greybeard hooks in /);
   const config = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(config.version, 1);
   assert.deepEqual(Object.keys(config.hooks).sort(), ['beforeSubmitPrompt', 'sessionStart']);
@@ -288,7 +288,7 @@ test('installer creates the file when absent and removes it again when only pony
   // Uninstalling on a clean machine is a no-op, not an error.
   result = cli(['uninstall'], env);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /No ponytail hooks/);
+  assert.match(result.stdout, /No greybeard hooks/);
 });
 
 test('installer --project writes <cwd>/.cursor/hooks.json', () => {

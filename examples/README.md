@@ -1,7 +1,7 @@
 # Examples
 
 Real model output, verbatim from benchmark runs, the same task answered by the same model
-with no skill (`## Without Ponytail`) and with ponytail (`## With Ponytail`), so you can
+with no skill (`## Without Greybeard`) and with greybeard (`## With Greybeard`), so you can
 compare side by side. Model: Claude Haiku 4.5, temperature 1, source `benchmarks/output.json`.
 
 These are not hand-written. Reproduce them yourself:

@@ -20,7 +20,7 @@ completeness also drops is doing less, not less-bloated -- and now the bench sho
 Judge: --model (default claude-sonnet-4-6). API key from ../../.env (shared with judge.py), or the
 claude CLI login when there is none.
 
-ponytail: reuses judge.py's HTTP/key/source plumbing instead of duplicating it -- one rubric
+greybeard: reuses judge.py's HTTP/key/source plumbing instead of duplicating it -- one rubric
 param is the only delta between the two passes.
 """
 import argparse, json, re, subprocess, sys
@@ -33,7 +33,7 @@ from judge import load_key, source_text, judge_call, parse_score, RUNS_DIR, JUDG
 
 SCORE_KEY = "completeness"
 FLAG_AT = 1                 # cells scoring <= this are under-delivery (stub/partial) and get listed
-ARMS_ORDER = ["baseline", "caveman", "ponytail", "ponytail2", "yagni", "yagni-oneliner"]
+ARMS_ORDER = ["baseline", "caveman", "greybeard", "greybeard2", "yagni", "yagni-oneliner"]
 # the tasks scored on LOC alone (no deterministic check): the only ones this pass is for
 LOC_ONLY = ("vibe-", "open-", "tmpl-")
 
@@ -117,7 +117,7 @@ def submission(ws, tid):
         if not text.strip() and (ws / "_claude.json").exists():
             try: text = json.loads((ws / "_claude.json").read_text(encoding="utf-8")).get("result", "") or ""
             except ValueError: text = ""                # the agent timed out: nothing delivered
-    return re.sub(r"\bponytail:", "note:", text, flags=re.I)
+    return re.sub(r"\bgreybeard:", "note:", text, flags=re.I)
 
 def run(run_dir, key, model=JUDGE_MODEL, arms=None, workers=6):
     run_dir = Path(run_dir)

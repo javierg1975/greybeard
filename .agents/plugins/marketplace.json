@@ -1,14 +1,14 @@
 {
-  "name": "ponytail",
+  "name": "greybeard",
   "interface": {
-    "displayName": "Ponytail"
+    "displayName": "Greybeard"
   },
   "plugins": [
     {
-      "name": "ponytail",
+      "name": "greybeard",
       "source": {
         "source": "url",
-        "url": "https://github.com/DietrichGebert/ponytail.git",
+        "url": "https://github.com/javierg1975/greybeard.git",
         "ref": "main"
       },
       "policy": {

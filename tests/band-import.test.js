@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const { CSV_HEADER, replyCost, sessionStats, csvRow, mergeRows, run } = require('../hooks/ponytail-band-import');
+const { CSV_HEADER, replyCost, sessionStats, csvRow, mergeRows, run } = require('../hooks/greybeard-band-import');
 
 // The import writes the band's own columns.
 const metrics = fs.readFileSync(path.join(root, 'hooks', 'band', 'metrics.ts'), 'utf8');
@@ -30,7 +30,7 @@ const reply = (t, id, usage, model = 'claude-opus-5-5') => ({ type: 'assistant',
 const tool = t => ({ type: 'user', timestamp: at(t), message: { content: [{ type: 'tool_result' }] } });
 const u = (input, output) => ({ input_tokens: input, output_tokens: output });
 const records = [
-  { type: 'user', timestamp: at('00:00'), message: { content: '<command-name>/ponytail</command-name>' } },
+  { type: 'user', timestamp: at('00:00'), message: { content: '<command-name>/greybeard</command-name>' } },
   prompt('00:00', 'Fix the cart totals\nplease'),
   reply('00:10', 'm1', u(1000, 100)),
   reply('00:10', 'm1', u(1000, 100)),
@@ -62,7 +62,7 @@ assert.equal(sessionStats([...records, { type: 'custom-title', customTitle: 'Car
 
 // A session reopened a day later with a slash command: a new turn, and the day between is not work.
 const later = sessionStats([...records,
-  { type: 'user', timestamp: '2026-10-02T10:00:00Z', message: { content: '<command-name>/ponytail</command-name>' } },
+  { type: 'user', timestamp: '2026-10-02T10:00:00Z', message: { content: '<command-name>/greybeard</command-name>' } },
   { type: 'user', timestamp: '2026-10-02T10:00:00Z', isMeta: true, message: { content: [{ type: 'text', text: 'skill body' }] } },
   { type: 'assistant', timestamp: '2026-10-02T10:00:05Z', message: { id: 'm9', model: 'claude-opus-5-5', usage: u(10, 1) } },
 ]);
@@ -87,7 +87,7 @@ assert.equal(merged.text.split('\n')[0], CSV_HEADER);
 assert.equal(mergeRows('', [row], new Set(['abcd1234-'])).added, 0, 'a session in another project file is not imported again');
 
 // End to end: transcripts under CLAUDE_CONFIG_DIR, the ledger under XDG_CONFIG_HOME.
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponytail-import-'));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'greybeard-import-'));
 const projects = path.join(temp, 'claude', 'projects', '-work-shop');
 fs.mkdirSync(path.join(projects, 'abcd1234-0000', 'subagents'), { recursive: true });
 const withCwd = r => ({ ...r, cwd: '/work/shop/.claude/worktrees/brave-otter' });
@@ -99,7 +99,7 @@ process.env.CLAUDE_CONFIG_DIR = path.join(temp, 'claude');
 process.env.XDG_CONFIG_HOME = path.join(temp, 'config');
 try {
   assert.deepEqual(run(), { sessions: 1, added: 1 }, 'the typed session is imported, the automated one is not');
-  const csv = fs.readFileSync(path.join(temp, 'config', 'ponytail', 'band', 'shop.csv'), 'utf8');
+  const csv = fs.readFileSync(path.join(temp, 'config', 'greybeard', 'band', 'shop.csv'), 'utf8');
   assert.equal(csv.split('\n')[0], CSV_HEADER, 'a desktop worktree counts for its repo');
   assert.ok(csv.includes(',shop,Fix the cart totals,'));
   assert.deepEqual(run(), { sessions: 1, added: 0 }, 'a second import adds nothing');

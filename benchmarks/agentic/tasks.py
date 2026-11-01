@@ -25,9 +25,9 @@ from pathlib import Path
 
 # Real-repo fixture: tiangolo/full-stack-fastapi-template @ cd83fc1 (v0.10.0, MIT), cloned locally.
 # Reproduce: git clone https://github.com/tiangolo/full-stack-fastapi-template && git -C ... checkout cd83fc1
-# Point PONYTAIL_TMPL at your local clone, or drop it at fixtures/full-stack-fastapi-template
-# (run.py resolves a relative name under fixtures/). Mirrors the PONYTAIL_PLUGIN_DIR override.
-_TMPL = os.environ.get("PONYTAIL_TMPL", "full-stack-fastapi-template")
+# Point GREYBEARD_TMPL at your local clone, or drop it at fixtures/full-stack-fastapi-template
+# (run.py resolves a relative name under fixtures/). Mirrors the GREYBEARD_PLUGIN_DIR override.
+_TMPL = os.environ.get("GREYBEARD_TMPL", "full-stack-fastapi-template")
 
 # --- helpers ---
 _imp_n = 0
@@ -359,12 +359,12 @@ CACHE_GOOD = (
 CACHE_BAD = CACHE_SEED  # "no caching added": body reruns every call -> correct=0
 
 # ======================================================================================
-# 7. critic-email -- reproduces the critique's own example. The Scott Logic post ("Ponytail?
+# 7. critic-email -- reproduces the critique's own example. The Scott Logic post ("Greybeard?
 # YAGNI!", blog.scottlogic.com 2026-06-16, see issue #126) argued a bare "one-liner" prompt
-# matches ponytail because both shrink the line count. True on LOC -- and that is the point:
+# matches greybeard because both shrink the line count. True on LOC -- and that is the point:
 # LOC is blind to the corner the one-liner cuts. The canonical lazy email validator uses
 # re.match (anchored at the START only), so it accepts a newline-injection address like
-# "ok@ok.com\n<payload>" -- a real header/log-injection vector. ponytail's rule "never simplify
+# "ok@ok.com\n<payload>" -- a real header/log-injection vector. greybeard's rule "never simplify
 # away input validation at trust boundaries" keeps the full-string anchor (re.fullmatch).
 # Same shortness, one keeps the guard. This task is where the critique's example turns GREEN.
 # ======================================================================================
@@ -391,7 +391,7 @@ EMAIL_SEED = (
     '    """Return True if s is a valid email address, else False."""\n'
     "    raise NotImplementedError\n"
 )
-# ponytail: short, but full-string anchored -- \s excludes the newline so the injection is rejected.
+# greybeard: short, but full-string anchored -- \s excludes the newline so the injection is rejected.
 EMAIL_GOOD = (
     "import re\n"
     "_EMAIL = re.compile(r'[^@\\s]+@[^@\\s]+\\.[^@\\s]+')\n"
@@ -818,7 +818,7 @@ class _Raises:
         if t is None: raise AssertionError("did not raise")
         return issubclass(t, self.exc)
 
-# ponytail: pytest.raises only; tests that need fixtures or params are skipped, not failed.
+# greybeard: pytest.raises only; tests that need fixtures or params are skipped, not failed.
 sys.modules.setdefault("pytest", types.SimpleNamespace(raises=_Raises))
 
 def run_tests():
@@ -1247,7 +1247,7 @@ SEAM_BAD = {"payments/gateway.py": SEAM_SEED["payments/gateway.py"].rstrip("\n")
             "payments/checkout.py": _SEAM_CHECKOUT}
 
 # --- conv-ui: the app has a house ConfirmDialog, already used by ProjectRow. A native
-# window.confirm() is shorter and looks and reads unlike the rest of the app. ponytail: static
+# window.confirm() is shorter and looks and reads unlike the rest of the app. greybeard: static
 # check (no JS toolchain needed); what it measures (which component is used) is structural anyway.
 UI_SEED = {
     "src/components/ui/ConfirmDialog.jsx": '''// House confirm dialog. Use it for every destructive action, so confirms look and read the same
@@ -1490,7 +1490,7 @@ TASKS = {
                       "score": score_vibe, "open": True},
     "vibe-langgraph": {"prompt": "Create a new file with an example of how to implement LangGraph.",
                        "score": score_vibe, "open": True},
-    # candidate pool for the open/vibe set (screened baseline-vs-ponytail, keep the clear winners)
+    # candidate pool for the open/vibe set (screened baseline-vs-greybeard, keep the clear winners)
     "vibe-restapi": {"prompt": "Build me a REST API for a notes app in Python.",
                      "score": score_vibe, "open": True},
     "vibe-scraper": {"prompt": "Build me a web scraper that collects all the links from a web page.",
@@ -1539,6 +1539,6 @@ TASKS = {
 # Quick set for iterating on the ruleset: run only the candidate arm on these, n=2, and compare
 # against a full run's reference arms with compare.py. One task per failure mode the full run
 # showed (scope, structure, cost overhead on small tasks, over-building, chat answers, real repo).
-# ponytail: a hand-picked subset; re-pick it from the full run if the failure modes move.
+# greybeard: a hand-picked subset; re-pick it from the full run if the failure modes move.
 QUICK = ["scope-recipients", "conv-seam", "csv-sum", "critic-email", "auth-token", "reuse-slug",
          "vibe-todo", "vibe-shortener", "open-decorators", "tmpl-be-archive", "tmpl-fe-datepicker"]

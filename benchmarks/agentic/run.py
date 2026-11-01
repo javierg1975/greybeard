@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agentic, multi-file benchmark for ponytail.
+"""Agentic, multi-file benchmark for greybeard.
 
 Runs each (task x arm x model) through a real headless Claude Code session in an isolated
 temp workspace seeded with a starter file, then scores the produced files deterministically
@@ -19,7 +19,7 @@ over-engineering score is a later pass.
       Recompute metrics + aggregate from kept workspaces. No API. Use after changing a
       metric or scorer so you never pay the API twice for a measurement tweak.
 
-ponytail: the claude CLI is the harness (already installed, we run inside it). No SDK
+greybeard: the claude CLI is the harness (already installed, we run inside it). No SDK
 dependency. The CLI's JSON output already carries cost/tokens/duration/permission_denials.
 """
 import argparse, concurrent.futures, datetime, json, os, re, shutil, signal, statistics, subprocess, sys, tempfile, zlib
@@ -34,12 +34,12 @@ RUNS_DIR = Path(__file__).resolve().parent / "runs"
 def _skill(rel): return (ROOT / rel).read_text(encoding="utf-8")
 ARMS = {
     "baseline":       lambda: None,
-    "ponytail":       lambda: _skill("skills/ponytail/SKILL.md"),
+    "greybeard":       lambda: _skill("skills/greybeard/SKILL.md"),
     "caveman":        lambda: _skill("benchmarks/arms/caveman-SKILL.md"),
     "yagni":          lambda: "Follow YAGNI principles.",
     "yagni-oneliner": lambda: "Follow YAGNI principles, and prefer one-liner solutions.",
     "brief":          lambda: "Be brief.",   # the two words that matched caveman in an independent test
-    "ponytail2":      lambda: None,          # plugin arm: PONYTAIL2_PLUGIN_DIR points at the candidate
+    "greybeard2":      lambda: None,          # plugin arm: GREYBEARD2_PLUGIN_DIR points at the candidate
     "concise":        lambda: None,          # Claude Code's built-in Concise output style, no plugin
 }
 SETTINGS_ARMS = {"concise": '{"outputStyle": "Concise"}'}   # arms that differ only by a settings value
@@ -50,14 +50,14 @@ MODELS = {"haiku": "claude-haiku-4-5-20251001", "sonnet": "claude-sonnet-5-5", "
 # Skills are plugins activated by a SessionStart hook. To test exactly one at a time we exclude the
 # user's globally-enabled plugins (--setting-sources project,local) and load one plugin from its
 # cache dir (--plugin-dir). The smoke test verifies activation by output style.
-PLUGIN_ARMS = ("ponytail", "caveman", "ponytail2")          # arms activated via --plugin-dir (vs raw --append prompts)
+PLUGIN_ARMS = ("greybeard", "caveman", "greybeard2")          # arms activated via --plugin-dir (vs raw --append prompts)
 PLUGIN_CACHE = Path.home() / ".claude" / "plugins" / "cache"
 
 def _plugin_dir(name):
     """Resolve a plugin's cache dir portably -- hardcoding one machine's absolute path
-    (e.g. C:\\Users\\<you>\\...) made the ponytail/caveman arms unreproducible off that box.
+    (e.g. C:\\Users\\<you>\\...) made the greybeard/caveman arms unreproducible off that box.
     Order: env override -> latest version dir under ~/.claude/plugins/cache -> clear error.
-    Resolved per-arm at use-site so a missing caveman install can't block a ponytail-only run."""
+    Resolved per-arm at use-site so a missing caveman install can't block a greybeard-only run."""
     env = os.environ.get(f"{name.upper()}_PLUGIN_DIR")
     if env: return env
     base = PLUGIN_CACHE / name / name
@@ -71,7 +71,7 @@ CELL_TIMEOUT = 300  # seconds per cell; a hung agent is force-killed (process tr
 # Added to every arm's system prompt, identically. We measure code PRODUCTION, not execution: agents
 # write the implementation and stop. No live verification -- earlier attempts had agents open a browser,
 # hit the template's login wall, and retry, inflating tokens/time with flailing instead of code. Writing
-# tests is still explicitly allowed, so ponytail's "leave a runnable check" discipline is not suppressed.
+# tests is still explicitly allowed, so greybeard's "leave a runnable check" discipline is not suppressed.
 NO_RUN = ("Write the implementation (include tests if you normally would for a change like this). "
           "Do not run a dev server, install dependencies, run a database, or open a browser to verify -- "
           "just write the code and stop. Only the code you write is measured, not its execution.")
@@ -101,7 +101,7 @@ def _selfcheck_split(p: Path):
     """Split a produced .py file at the first TOP-LEVEL self-check marker (a `__main__` guard or a
     demo()/selfcheck() function) through end of file. Returns (src_total, src_code, sc_total,
     sc_code), counted like _count. On a surgical task that delivers ONE function, an in-file self-
-    check is the runnable check ponytail's rule asks for -- a positive signal, not source bloat --
+    check is the runnable check greybeard's rule asks for -- a positive signal, not source bloat --
     so it is split off here and counted as test LOC instead of penalising the arm that wrote it."""
     try: lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
     except Exception: return 0, 0, 0, 0
@@ -135,7 +135,7 @@ def code_stats(workdir: Path, selfcheck_as_test: bool = False):
     total_loc counts every non-blank line including comments and docstrings -- the bloat a vibe
     baseline actually produces. src_loc is code-only, for the breakdown. Tests tracked separately,
     never as bloat. selfcheck_as_test (surgical tasks): an in-file __main__/demo() self-check is
-    reclassified from source to test, so following ponytail's 'leave a runnable check' rule is not
+    reclassified from source to test, so following greybeard's 'leave a runnable check' rule is not
     counted as code bloat against it."""
     fixture = set()                                   # files that were seeded, not delivered
     fm = workdir / "_fixture_files.json"
@@ -232,20 +232,20 @@ def _selftest_plugin_dir():
     """Plugin-dir resolution must be portable: env override wins, and a missing install
     fails loudly (sys.exit) instead of silently passing a non-existent path to --plugin-dir."""
     fails = 0
-    sentinel = "/tmp/ponytail-selftest-plugin-dir"
-    previous = os.environ.get("PONYTAIL_PLUGIN_DIR")
-    os.environ["PONYTAIL_PLUGIN_DIR"] = sentinel
+    sentinel = "/tmp/greybeard-selftest-plugin-dir"
+    previous = os.environ.get("GREYBEARD_PLUGIN_DIR")
+    os.environ["GREYBEARD_PLUGIN_DIR"] = sentinel
     try:
-        ok_env = _plugin_dir("ponytail") == sentinel
+        ok_env = _plugin_dir("greybeard") == sentinel
     finally:                                         # restore, never delete: this selftest runs before
         if previous is None:                         # every live run, so deleting it silently swapped the
-            del os.environ["PONYTAIL_PLUGIN_DIR"]    # user's override for the newest cached plugin version
+            del os.environ["GREYBEARD_PLUGIN_DIR"]    # user's override for the newest cached plugin version
         else:
-            os.environ["PONYTAIL_PLUGIN_DIR"] = previous
-    ok_env = ok_env and os.environ.get("PONYTAIL_PLUGIN_DIR") == previous
+            os.environ["GREYBEARD_PLUGIN_DIR"] = previous
+    ok_env = ok_env and os.environ.get("GREYBEARD_PLUGIN_DIR") == previous
     print(f"{'ok ' if ok_env else 'XX '} plugin_dir   env  override honored and restored")
     fails += 0 if ok_env else 1
-    missing = "ponytail-does-not-exist-xyz"          # no env, no cache entry -> must sys.exit
+    missing = "greybeard-does-not-exist-xyz"          # no env, no cache entry -> must sys.exit
     try:
         _plugin_dir(missing); ok_miss = False        # reached only if it did NOT exit -> broken
     except SystemExit:
@@ -376,7 +376,7 @@ def run_cell(task_id, arm, model, workdir: Path):
     try:
         with open(out_path, "wb") as so, open(err_path, "wb") as se:
             # Cells live under this repo, so without these every arm (baseline too) also loads the
-            # repo's AGENTS.md, which is the ponytail ruleset, plus the user's auto-memory.
+            # repo's AGENTS.md, which is the greybeard ruleset, plus the user's auto-memory.
             env = {**os.environ, "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
             proc = subprocess.Popen(cmd, cwd=str(workdir), stdout=so, stderr=se, env=env,
                                     start_new_session=(os.name != "nt"))
@@ -497,7 +497,7 @@ def main():
     # Cells run outside any git repo, then move into out_dir. Inside a repo, Claude Code shows the
     # model that repo's branch and recent commit messages, so this repo's own history leaked into
     # every task without its own git snapshot.
-    scratch = Path(tempfile.mkdtemp(prefix=f"ponytail-bench-{stamp}-"))
+    scratch = Path(tempfile.mkdtemp(prefix=f"greybeard-bench-{stamp}-"))
 
     def _one(spec):
         tid, arm, model, r = spec

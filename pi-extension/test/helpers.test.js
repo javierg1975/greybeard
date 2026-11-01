@@ -6,39 +6,39 @@ import test from "node:test";
 
 import {
   filterSkillBodyForMode,
-  parsePonytailCommand,
+  parseGreybeardCommand,
   readDefaultMode,
   readQuietStartup,
   resolveSessionMode,
   writeDefaultMode,
 } from "../index.js";
 
-test("parsePonytailCommand falls back to full when invoked bare and default is off", () => {
-  assert.deepEqual(parsePonytailCommand("", "off"), { type: "set-mode", mode: "full" });
-  // #639: when ponytail is already on, a bare command reports instead of resetting the level.
-  assert.deepEqual(parsePonytailCommand("", "full", "ultra"), { type: "status" });
-  assert.deepEqual(parsePonytailCommand("", "full", "off"), { type: "set-mode", mode: "full" });
+test("parseGreybeardCommand falls back to full when invoked bare and default is off", () => {
+  assert.deepEqual(parseGreybeardCommand("", "off"), { type: "set-mode", mode: "full" });
+  // #639: when greybeard is already on, a bare command reports instead of resetting the level.
+  assert.deepEqual(parseGreybeardCommand("", "full", "ultra"), { type: "status" });
+  assert.deepEqual(parseGreybeardCommand("", "full", "off"), { type: "set-mode", mode: "full" });
 });
 
-test("parsePonytailCommand parses modes, status, and default subcommand", () => {
-  assert.deepEqual(parsePonytailCommand("ultra", "full"), { type: "set-mode", mode: "ultra" });
-  assert.deepEqual(parsePonytailCommand("status", "full"), { type: "status" });
-  assert.deepEqual(parsePonytailCommand("default lite", "full"), { type: "set-default", mode: "lite" });
+test("parseGreybeardCommand parses modes, status, and default subcommand", () => {
+  assert.deepEqual(parseGreybeardCommand("ultra", "full"), { type: "set-mode", mode: "ultra" });
+  assert.deepEqual(parseGreybeardCommand("status", "full"), { type: "status" });
+  assert.deepEqual(parseGreybeardCommand("default lite", "full"), { type: "set-default", mode: "lite" });
 });
 
-test("parsePonytailCommand rejects review as a default (session-only mode, #377)", () => {
-  assert.deepEqual(parsePonytailCommand("default review", "full"), { type: "invalid", reason: "invalid-default-mode" });
+test("parseGreybeardCommand rejects review as a default (session-only mode, #377)", () => {
+  assert.deepEqual(parseGreybeardCommand("default review", "full"), { type: "invalid", reason: "invalid-default-mode" });
 });
 
 test("resolveSessionMode still honors review as a session mode (not a default)", () => {
-  const entries = [{ type: "custom", customType: "ponytail-mode", data: { mode: "review" } }];
+  const entries = [{ type: "custom", customType: "greybeard-mode", data: { mode: "review" } }];
   assert.equal(resolveSessionMode(entries, "full"), "review");
 });
 
 test("resolveSessionMode prefers latest persisted session mode", () => {
   const entries = [
-    { type: "custom", customType: "ponytail-mode", data: { mode: "lite" } },
-    { type: "custom", customType: "ponytail-mode", data: { mode: "ultra" } },
+    { type: "custom", customType: "greybeard-mode", data: { mode: "lite" } },
+    { type: "custom", customType: "greybeard-mode", data: { mode: "ultra" } },
   ];
 
   assert.equal(resolveSessionMode(entries, "full"), "ultra");
@@ -52,12 +52,12 @@ test("resolveSessionMode returns fallback when entries is not an array", () => {
 });
 
 test("readDefaultMode and writeDefaultMode use XDG config path", () => {
-  const tempDir = mkdtempSync(join(tmpdir(), "ponytail-config-"));
+  const tempDir = mkdtempSync(join(tmpdir(), "greybeard-config-"));
   const previousXdg = process.env.XDG_CONFIG_HOME;
-  const previousDefault = process.env.PONYTAIL_DEFAULT_MODE;
-  const configPath = join(tempDir, "ponytail", "config.json");
+  const previousDefault = process.env.GREYBEARD_DEFAULT_MODE;
+  const configPath = join(tempDir, "greybeard", "config.json");
   process.env.XDG_CONFIG_HOME = tempDir;
-  delete process.env.PONYTAIL_DEFAULT_MODE;
+  delete process.env.GREYBEARD_DEFAULT_MODE;
 
   try {
     assert.equal(readDefaultMode(), "full");
@@ -68,46 +68,46 @@ test("readDefaultMode and writeDefaultMode use XDG config path", () => {
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = previousXdg;
-    if (previousDefault === undefined) delete process.env.PONYTAIL_DEFAULT_MODE;
-    else process.env.PONYTAIL_DEFAULT_MODE = previousDefault;
+    if (previousDefault === undefined) delete process.env.GREYBEARD_DEFAULT_MODE;
+    else process.env.GREYBEARD_DEFAULT_MODE = previousDefault;
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
 test("readDefaultMode trims and normalizes whitespace in env and config values", () => {
-  const tempDir = mkdtempSync(join(tmpdir(), "ponytail-default-normalize-"));
+  const tempDir = mkdtempSync(join(tmpdir(), "greybeard-default-normalize-"));
   const previousXdg = process.env.XDG_CONFIG_HOME;
-  const previousDefault = process.env.PONYTAIL_DEFAULT_MODE;
-  const configDir = join(tempDir, "ponytail");
+  const previousDefault = process.env.GREYBEARD_DEFAULT_MODE;
+  const configDir = join(tempDir, "greybeard");
   const configPath = join(configDir, "config.json");
   mkdirSync(configDir, { recursive: true });
   process.env.XDG_CONFIG_HOME = tempDir;
-  process.env.PONYTAIL_DEFAULT_MODE = "  FULL  ";
+  process.env.GREYBEARD_DEFAULT_MODE = "  FULL  ";
   writeFileSync(configPath, JSON.stringify({ defaultMode: "\tultra\n" }), "utf8");
 
   try {
     assert.equal(readDefaultMode(), "full");
-    process.env.PONYTAIL_DEFAULT_MODE = "\n lite \r\n";
+    process.env.GREYBEARD_DEFAULT_MODE = "\n lite \r\n";
     assert.equal(readDefaultMode(), "lite");
-    delete process.env.PONYTAIL_DEFAULT_MODE;
+    delete process.env.GREYBEARD_DEFAULT_MODE;
     assert.equal(readDefaultMode(), "ultra");
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = previousXdg;
-    if (previousDefault === undefined) delete process.env.PONYTAIL_DEFAULT_MODE;
-    else process.env.PONYTAIL_DEFAULT_MODE = previousDefault;
+    if (previousDefault === undefined) delete process.env.GREYBEARD_DEFAULT_MODE;
+    else process.env.GREYBEARD_DEFAULT_MODE = previousDefault;
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
 test("readQuietStartup resolves env var, config file, and default in that order", () => {
-  const tempDir = mkdtempSync(join(tmpdir(), "ponytail-quiet-"));
+  const tempDir = mkdtempSync(join(tmpdir(), "greybeard-quiet-"));
   const previousXdg = process.env.XDG_CONFIG_HOME;
-  const previousEnv = process.env.PONYTAIL_QUIET_STARTUP;
-  const configDir = join(tempDir, "ponytail");
+  const previousEnv = process.env.GREYBEARD_QUIET_STARTUP;
+  const configDir = join(tempDir, "greybeard");
   const configPath = join(configDir, "config.json");
   process.env.XDG_CONFIG_HOME = tempDir;
-  delete process.env.PONYTAIL_QUIET_STARTUP;
+  delete process.env.GREYBEARD_QUIET_STARTUP;
 
   try {
     // No env, no config -> default false (toast still shows)
@@ -119,15 +119,15 @@ test("readQuietStartup resolves env var, config file, and default in that order"
     assert.equal(readQuietStartup(), true);
 
     // Env var overrides config
-    process.env.PONYTAIL_QUIET_STARTUP = "false";
+    process.env.GREYBEARD_QUIET_STARTUP = "false";
     assert.equal(readQuietStartup(), false);
-    process.env.PONYTAIL_QUIET_STARTUP = "1";
+    process.env.GREYBEARD_QUIET_STARTUP = "1";
     assert.equal(readQuietStartup(), true);
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = previousXdg;
-    if (previousEnv === undefined) delete process.env.PONYTAIL_QUIET_STARTUP;
-    else process.env.PONYTAIL_QUIET_STARTUP = previousEnv;
+    if (previousEnv === undefined) delete process.env.GREYBEARD_QUIET_STARTUP;
+    else process.env.GREYBEARD_QUIET_STARTUP = previousEnv;
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
@@ -135,7 +135,7 @@ test("readQuietStartup resolves env var, config file, and default in that order"
 test("filterSkillBodyForMode keeps only requested intensity examples and rows", () => {
   // Examples are quoted in the real SKILL.md (`- lite: "..."`) — match that
   // shape here too; see the next test for why the quote is load-bearing.
-  const body = `---\nname: ponytail\n---\n| **lite** | keep lite |\n| **full** | keep full |\n| **ultra** | keep ultra |\n- lite: "Lite example"\n- full: "Full example"\n- ultra: "Ultra example"\nOther line`;
+  const body = `---\nname: greybeard\n---\n| **lite** | keep lite |\n| **full** | keep full |\n| **ultra** | keep ultra |\n- lite: "Lite example"\n- full: "Full example"\n- ultra: "Ultra example"\nOther line`;
 
   const filtered = filterSkillBodyForMode(body, "ultra");
 
@@ -165,7 +165,7 @@ test("filterSkillBodyForMode keeps rule bullets that contain a colon", () => {
   // Regression: rule bullets outside the Intensity section (e.g. the
   // "No unrequested abstractions:" rule or the `shortcut:` comment convention)
   // contain a colon and must not be mistaken for mode-example lines.
-  const skillPath = new URL("../../skills/ponytail/SKILL.md", import.meta.url);
+  const skillPath = new URL("../../skills/greybeard/SKILL.md", import.meta.url);
   const body = readFileSync(skillPath, "utf8");
 
   const filtered = filterSkillBodyForMode(body, "full");

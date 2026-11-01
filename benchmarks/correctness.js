@@ -18,7 +18,7 @@ const os = require('os');
 const path = require('path');
 
 function correctnessTimeoutMs() {
-  const value = Number.parseInt(process.env.PONYTAIL_CORRECTNESS_TIMEOUT_MS || '', 10);
+  const value = Number.parseInt(process.env.GREYBEARD_CORRECTNESS_TIMEOUT_MS || '', 10);
   return Number.isFinite(value) && value > 0 ? value : 30_000;
 }
 
@@ -26,7 +26,7 @@ function correctnessTimeoutMs() {
 function extractBlocks(text) {
   text = String(text || '');
   const matches = [...text.matchAll(/```(\w*)\r?\n([\s\S]*?)```/g)];
-  // ponytail: terse models often answer with bare, unfenced code. Treat the whole
+  // greybeard: terse models often answer with bare, unfenced code. Treat the whole
   // response as one block so the gate scores the code instead of reporting "no block".
   if (matches.length === 0 && text.trim()) return [{ lang: '', code: text }];
   return matches.map((m) => ({ lang: (m[1] || '').toLowerCase(), code: m[2] }));
@@ -54,7 +54,7 @@ function exec(cmd, opts = {}) {
   }
 }
 
-// ponytail: probe once at load; macOS and many Linux images ship python3 only.
+// greybeard: probe once at load; macOS and many Linux images ship python3 only.
 // Prefer one with pandas (the csv task needs it): on Windows python3 can be a
 // bundled Python without it while python has it (#919).
 let pythonCmd;
@@ -69,7 +69,7 @@ function python() {
 
 // Write content to a temp file, return the path.
 function tmpFile(ext, content) {
-  const p = path.join(os.tmpdir(), `ponytail-bench-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+  const p = path.join(os.tmpdir(), `greybeard-bench-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
   fs.writeFileSync(p, content);
   return p;
 }

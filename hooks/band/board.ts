@@ -461,11 +461,11 @@ const APP = `(function () {
   function download(blob, name) { var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click() }
   // The saved card carries its own copy of the logo, so it stands alone.
   function cardText() { var c = byId('card').cloneNode(true); c.querySelector('defs').append(byId('pt-logo').cloneNode(true)); return new XMLSerializer().serializeToString(c) }
-  function saveSvg() { download(new Blob([cardText()], { type: 'image/svg+xml' }), 'ponytail-card.svg') }
+  function saveSvg() { download(new Blob([cardText()], { type: 'image/svg+xml' }), 'greybeard-card.svg') }
   function savePng() {
     var img = new Image()
     img.onload = function () {
-      try { var c = document.createElement('canvas'); c.width = 1200; c.height = 630; c.getContext('2d').drawImage(img, 0, 0); c.toBlob(function (b) { b ? download(b, 'ponytail-card.png') : saveSvg() }) } catch (e) { saveSvg() }
+      try { var c = document.createElement('canvas'); c.width = 1200; c.height = 630; c.getContext('2d').drawImage(img, 0, 0); c.toBlob(function (b) { b ? download(b, 'greybeard-card.png') : saveSvg() }) } catch (e) { saveSvg() }
     }
     img.onerror = saveSvg
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(cardText())
@@ -492,12 +492,12 @@ const APP = `(function () {
     b.title = 'Theme: ' + choice
   }
   var saved = 'dark'
-  try { saved = localStorage.getItem('ponytail-board-theme') || 'dark' } catch (e) {}
+  try { saved = localStorage.getItem('greybeard-board-theme') || 'dark' } catch (e) {}
   applyTheme(THEMES.indexOf(saved) >= 0 ? saved : 'dark')
   byId('theme').addEventListener('click', function () {
     var next = THEMES[(THEMES.indexOf(byId('theme').getAttribute('data-choice')) + 1) % THEMES.length]
     applyTheme(next)
-    try { localStorage.setItem('ponytail-board-theme', next) } catch (e) {}
+    try { localStorage.setItem('greybeard-board-theme', next) } catch (e) {}
   })
 
   render()
@@ -514,11 +514,11 @@ const CARD = `<svg id="card" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120
 <rect width="1200" height="630" fill="#070707"/><rect width="1200" height="630" fill="url(#chalo)"/>
 <g id="c-stream"></g><rect y="600" width="1200" height="30" fill="#070707"/>
 <use href="#pt-logo" x="72" y="62" width="48" height="55"/>
-<text x="134" y="98" font-family="${MONO}" font-size="28" font-weight="600" fill="#f3f2ee">ponytail</text>
+<text x="134" y="98" font-family="${MONO}" font-size="28" font-weight="600" fill="#f3f2ee">greybeard</text>
 <text id="c-scope" x="1128" y="98" text-anchor="end" font-size="20" fill="#8d8b84"></text>
 <text x="72" y="196" font-size="22" fill="#8d8b84">Agent time</text><text id="c-time" x="66" y="292" font-family="${MONO}" font-size="104" font-weight="600" letter-spacing="-5" fill="#f3f2ee"></text>
 ${cardStat(172, 'Cost', 'c-cost')}${cardStat(228, 'Tokens', 'c-tokens')}${cardStat(284, 'Sessions', 'c-sessions')}
-<text x="72" y="621" font-family="${MONO}" font-size="15" fill="#5e5c55">measured in Claude Code</text><text x="1128" y="621" text-anchor="end" font-family="${MONO}" font-size="15" fill="#5fe08a">ponytail.dev</text></svg>`
+<text x="72" y="621" font-family="${MONO}" font-size="15" fill="#5e5c55">measured in Claude Code</text><text x="1128" y="621" text-anchor="end" font-family="${MONO}" font-size="15" fill="#5fe08a">greybeard</text></svg>`
 
 // JSON inside a script block: "<" is escaped so no name can close the block.
 const json = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
@@ -534,10 +534,10 @@ const SEARCH_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"
 export function boardHtml(tasks: Task[], now: number): string {
   const seg = (attr: string, items: [string, string][], on: string) =>
     items.map(([value, label]) => `<button type="button" data-${attr}="${value}"${value === on ? ' class="on"' : ''}>${label}</button>`).join('')
-  return `<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ponytail board</title><link rel="icon" href="${FAVICON}"><style>${CSS}</style></head>
+  return `<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>greybeard board</title><link rel="icon" href="${FAVICON}"><style>${CSS}</style></head>
 <body><svg class="sprite" aria-hidden="true" focusable="false"><symbol id="pt-logo" viewBox="${LOGO_VIEWBOX}"><g fill="#1d1c1a">${LOGO_PATHS}</g></symbol></svg>
 <div class="app">
-<aside class="side"><div class="brand"><span class="logo"><svg viewBox="${LOGO_VIEWBOX}" aria-hidden="true"><use href="#pt-logo"/></svg></span>ponytail</div><div class="side-label">Projects</div><nav id="projects"></nav><div class="side-foot"><div class="foot-text">Local board<br>${esc(day(now))}</div><span class="foot-sep"></span>${THEME_BUTTON}</div></aside>
+<aside class="side"><div class="brand"><span class="logo"><svg viewBox="${LOGO_VIEWBOX}" aria-hidden="true"><use href="#pt-logo"/></svg></span>greybeard</div><div class="side-label">Projects</div><nav id="projects"></nav><div class="side-foot"><div class="foot-text">Local board<br>${esc(day(now))}</div><span class="foot-sep"></span>${THEME_BUTTON}</div></aside>
 <main>
 <div class="top"><div><div class="crumb">Board / <b id="crumb"></b></div><h1 id="title"></h1><p id="subtitle"></p></div>
 <div class="actions"><div class="seg" role="group" aria-label="Period">${seg('period', [['7', '7d'], ['30', '30d'], ['90', '90d'], ['0', 'All']], '30')}</div><button type="button" class="btn" id="share">Share card</button></div></div>
@@ -552,7 +552,7 @@ export function boardHtml(tasks: Task[], now: number): string {
 <div class="heroes"><div><div class="hero-label"><i style="color:#5fe08a">✦</i>Active days</div><div class="hero-value num" id="h-active"></div><div class="hero-sub" id="h-active-sub"></div></div>
 <div><div class="hero-label"><i style="color:#ffd166">◆</i>Streak</div><div class="hero-value num" id="h-streak"></div><div class="hero-sub" id="h-streak-sub"></div></div></div><div id="facts"></div></section>
 </div>
-<footer>Measured by ponytail's band in Claude Code. Cost is the API-priced cost Claude Code reports (/cost), not a bill. Nothing here is estimated.</footer>
+<footer>Measured by greybeard's band in Claude Code. Cost is the API-priced cost Claude Code reports (/cost), not a bill. Nothing here is estimated.</footer>
 </main></div>
 <dialog id="share-dialog"><div class="dlg-head"><b>Share card</b><div class="dlg-actions"><button type="button" class="btn" id="save-png">Save PNG</button><button type="button" class="btn" id="save-svg">Save SVG</button><button type="button" class="btn" id="share-close">Close</button></div></div><div class="dlg-body">${CARD}</div></dialog>
 <script type="application/json" id="board-data">${json({ now, tasks })}</script>

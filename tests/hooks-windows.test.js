@@ -109,12 +109,12 @@ test('every hook command points at a script that ships in hooks/', () => {
 // fires. The hook must never wait on stdin forever — that freezes the whole
 // session. It has to self-exit even when stdin stays open and empty. The
 // activate hook reads the SessionStart source from stdin too.
-for (const script of ['ponytail-mode-tracker.js', 'ponytail-activate.js']) {
+for (const script of ['greybeard-mode-tracker.js', 'greybeard-activate.js']) {
   test(`${script} self-exits when stdin never closes (no freeze)`, async () => {
     const hook = path.join(root, 'hooks', script);
     // A throwaway home: the activate fallback writes the flag and the statusline copy.
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ponytail-stdin-'));
-    const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), PONYTAIL_MAP: '0' };
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'greybeard-stdin-'));
+    const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), GREYBEARD_MAP: '0' };
     // stdin is a pipe we never write to or end, reproducing the deadlock.
     const child = spawn(process.execPath, [hook], { env, stdio: ['pipe', 'ignore', 'ignore'] });
 
@@ -133,9 +133,9 @@ for (const script of ['ponytail-mode-tracker.js', 'ponytail-activate.js']) {
 }
 
 test('Claude and Codex manifests point at the shared host-specific hook config', () => {
-  // Claude Code also loads the band's hooks module, from a file of its own the other hosts never read.
+  // Claude Code also loads the band's hooks module and the check hook, from files the other hosts never read.
   const expected = {
-    '.claude-plugin/plugin.json': [`./${HOOKS_JSON}`, './hooks/claude-band.json'],
+    '.claude-plugin/plugin.json': [`./${HOOKS_JSON}`, './hooks/claude-band.json', './hooks/claude-check-hooks.json'],
     '.codex-plugin/plugin.json': `./${HOOKS_JSON}`,
   };
   for (const rel of HOST_PLUGIN_MANIFESTS) {
@@ -179,7 +179,7 @@ test('a hostile plugin root cannot inject shell commands via host-side textual s
   const commands = [...commandHooks().map((h) => h.command), ...copilotCommands()].filter(Boolean);
   assert.ok(commands.length > 0, 'expected at least one command to check');
 
-  const marker = path.join(os.tmpdir(), `ponytail-824-marker-${process.pid}`);
+  const marker = path.join(os.tmpdir(), `greybeard-824-marker-${process.pid}`);
   const hostileRoot = isWindows
     ? `C:\\x" ; New-Item -ItemType File -Path "${marker}" ; "`
     : `/tmp/x"; touch "${marker}"; echo "`;

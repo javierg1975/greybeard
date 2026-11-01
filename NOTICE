@@ -1,0 +1,12 @@
+greybeard
+Copyright (c) 2026 Javier Gonzalez
+
+This project is a derivative of ponytail by Dietrich Gebert
+(https://github.com/DietrichGebert/ponytail), used under the MIT License.
+The original copyright and license text are kept in LICENSE.
+
+greybeard renames ponytail's skills, commands, hooks and settings, adds an
+FP-leaning ruleset (domain types, lawful instances, errors as values) and
+the `greybeard check` enforcement hook. The benchmark results under
+benchmarks/results/ and the figures in skills/greybeard-gain were measured
+on ponytail's ruleset, not greybeard's.

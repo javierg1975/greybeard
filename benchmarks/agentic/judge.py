@@ -13,7 +13,7 @@ minimal one for the same task, or we do not trust it on real submissions.
 Judge: claude-sonnet-4-6 via the Anthropic Messages API (key from ../../.env). Scores the SOURCE
 files only (tests excluded -- a test is not over-engineering). Cost is ~$0.003/cell.
 
-ponytail: stdlib urllib for the API call, no requests dependency.
+greybeard: stdlib urllib for the API call, no requests dependency.
 """
 import argparse, json, os, re, shutil, subprocess, sys, tempfile, time, urllib.request
 from collections import defaultdict
@@ -63,7 +63,7 @@ def source_text(workdir: Path):
 
 def _cli_call(system, user, model):
     """No API key: the same judge through the headless claude CLI and the user's login. No tools,
-    no plugins, no CLAUDE.md, empty cwd. ponytail: the CLI has no temperature flag, so CLI judging
+    no plugins, no CLAUDE.md, empty cwd. greybeard: the CLI has no temperature flag, so CLI judging
     is not temperature 0; the live selftest gates it the same way."""
     env = {**os.environ, "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
     with tempfile.TemporaryDirectory() as d:
@@ -171,7 +171,7 @@ def run(run_dir, key):
         if isinstance(r["over_engineering"], int): by_arm[r["arm"]].append(r["over_engineering"])
     print(f"\n=== over-engineering by arm (judge: {JUDGE_MODEL}, 0=minimal .. 3=over-built) ===")
     print(f"  {'arm':16} {'n':>4} {'mean':>6} {'max':>4}")
-    for arm in ["baseline", "caveman", "ponytail", "yagni", "yagni-oneliner"]:
+    for arm in ["baseline", "caveman", "greybeard", "yagni", "yagni-oneliner"]:
         v = by_arm.get(arm, [])
         if v: print(f"  {arm:16} {len(v):>4} {sum(v)/len(v):>6.2f} {max(v):>4}")
     worst = sorted([r for r in scored if isinstance(r["over_engineering"], int) and r["over_engineering"] >= 2],

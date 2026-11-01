@@ -1,5 +1,5 @@
 {
-  "name": "ponytail",
+  "name": "greybeard",
   "version": "5.3.3",
   "description": "Lazy senior dev mode. Forces the simplest, shortest solution that actually works: YAGNI, stdlib first, no unrequested abstractions.",
   "author": {
@@ -8,14 +8,15 @@
   },
   "hooks": [
     "./hooks/claude-codex-hooks.json",
-    "./hooks/claude-band.json"
+    "./hooks/claude-band.json",
+    "./hooks/claude-check-hooks.json"
   ],
   "types": "./hooks/band/types.d.ts",
   "userConfig": {
     "ledger": {
       "type": "boolean",
       "title": "Task board",
-      "description": "After every turn, write this task's row (cost, turns, agent time, tokens, reuse, tests) to ~/.config/ponytail/band/<project>.csv for the board.",
+      "description": "After every turn, write this task's row (cost, turns, agent time, tokens, reuse, tests) to ~/.config/greybeard/band/<project>.csv for the board.",
       "default": true
     },
     "webhookUrl": {

@@ -13,33 +13,33 @@ const { pathToFileURL } = require('url');
 // plugin resolves its state path once at load (as it does under a real OpenCode
 // process, where XDG_CONFIG_HOME is already set). The dynamic import below runs
 // after this assignment, so the ordering holds.
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponytail-opencode-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'greybeard-opencode-'));
 process.env.XDG_CONFIG_HOME = tmp;
-delete process.env.PONYTAIL_DEFAULT_MODE;
-const statePath = path.join(tmp, 'opencode', '.ponytail-active');
+delete process.env.GREYBEARD_DEFAULT_MODE;
+const statePath = path.join(tmp, 'opencode', '.greybeard-active');
 
 let loadPlugin, parseCommandFile, parseSkillFile;
 test.before(async () => {
-  const url = pathToFileURL(path.join(__dirname, '..', '.opencode', 'plugins', 'ponytail.mjs'));
+  const url = pathToFileURL(path.join(__dirname, '..', '.opencode', 'plugins', 'greybeard.mjs'));
   const mod = await import(url);
   loadPlugin = mod.default;
   // The frontmatter parser used to be exported from the plugin module itself.
   // OpenCode's legacy loader treats every exported function as a plugin and
   // tried to invoke it with the plugin context object, which crashed. The
   // parser now lives in its own .cjs sibling; require it directly.
-  const parser = require(path.join(__dirname, '..', '.opencode', 'plugins', 'ponytail-frontmatter.cjs'));
+  const parser = require(path.join(__dirname, '..', '.opencode', 'plugins', 'greybeard-frontmatter.cjs'));
   parseCommandFile = parser.parseCommandFile;
   parseSkillFile = parser.parseSkillFile;
 });
 
 test('plugin module exposes only the default export (regression guard for #631, #301)', async () => {
-  const url = pathToFileURL(path.join(__dirname, '..', '.opencode', 'plugins', 'ponytail.mjs'));
+  const url = pathToFileURL(path.join(__dirname, '..', '.opencode', 'plugins', 'greybeard.mjs'));
   const mod = await import(url);
   const namedExports = Object.keys(mod).filter((k) => k !== 'default');
   assert.deepEqual(
     namedExports,
     [],
-    'ponytail.mjs must not have named exports: OpenCode\'s legacy getLegacyPlugins() ' +
+    'greybeard.mjs must not have named exports: OpenCode\'s legacy getLegacyPlugins() ' +
     'loader calls every exported function as a plugin factory'
   );
 });
@@ -49,7 +49,7 @@ test('plugin module exposes only the default export (regression guard for #631, 
 // rejects the V1 function shape outright, so this is the whole load contract.
 test('default export is a V2 definition with id + setup, and a V1 server()', () => {
   assert.equal(typeof loadPlugin, 'object', 'V2 needs an object, not the V1 plugin function');
-  assert.equal(loadPlugin.id, 'ponytail');
+  assert.equal(loadPlugin.id, 'greybeard');
   assert.equal(typeof loadPlugin.setup, 'function');
   assert.equal(typeof loadPlugin.server, 'function', 'V1 OpenCode still calls server()');
 });
@@ -85,7 +85,7 @@ test('V2 setup registers all six commands and all six skills', async () => {
   const { added } = await setupV2();
   assert.deepEqual(
     added.commands.map((c) => c.name).sort(),
-    ['ponytail', 'ponytail-audit', 'ponytail-debt', 'ponytail-gain', 'ponytail-help', 'ponytail-review'],
+    ['greybeard', 'greybeard-audit', 'greybeard-debt', 'greybeard-gain', 'greybeard-help', 'greybeard-review'],
   );
   assert.equal(added.skills.length, 6);
   for (const skill of added.skills) {
@@ -97,24 +97,24 @@ test('V2 setup registers all six commands and all six skills', async () => {
 
 test('V2 skill transform matches what OpenCode derives from the same SKILL.md', async () => {
   const { added } = await setupV2();
-  const ponytail = added.skills.find((s) => s.id === 'ponytail');
-  const source = parseSkillFile(path.join(__dirname, '..', 'skills', 'ponytail', 'SKILL.md'));
-  assert.equal(ponytail.description, source.description);
-  assert.ok(ponytail.description.startsWith('Lazy senior dev mode: the smallest change'), 'folded > block joined');
-  assert.ok(ponytail.description.endsWith('\n'), 'YAML closes a folded scalar with a newline');
-  assert.ok(!ponytail.description.includes('argument-hint'), 'block scalar stops at the next key');
-  assert.equal(ponytail.content, source.body);
-  assert.ok(!ponytail.content.includes('description:'), 'content is the body, frontmatter stripped');
+  const greybeard = added.skills.find((s) => s.id === 'greybeard');
+  const source = parseSkillFile(path.join(__dirname, '..', 'skills', 'greybeard', 'SKILL.md'));
+  assert.equal(greybeard.description, source.description);
+  assert.ok(greybeard.description.startsWith('Lazy, FP-leaning senior dev mode: the smallest change'), 'folded > block joined');
+  assert.ok(greybeard.description.endsWith('\n'), 'YAML closes a folded scalar with a newline');
+  assert.ok(!greybeard.description.includes('argument-hint'), 'block scalar stops at the next key');
+  assert.equal(greybeard.content, source.body);
+  assert.ok(!greybeard.content.includes('description:'), 'content is the body, frontmatter stripped');
 });
 
-test('V2 /ponytail ultra persists the level and sends the template with the args', async () => {
+test('V2 /greybeard ultra persists the level and sends the template with the args', async () => {
   const { added, prompts } = await setupV2();
-  await added.commands.ponytail.execute({ sessionID: 's', prompt: { text: 'ultra' }, delivery: 'steer' });
+  await added.commands.greybeard.execute({ sessionID: 's', prompt: { text: 'ultra' }, delivery: 'steer' });
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'ultra');
   assert.equal(prompts.length, 1);
   assert.equal(prompts[0].sessionID, 's');
   assert.equal(prompts[0].delivery, 'steer');
-  assert.match(prompts[0].text, /^Switch to ponytail ultra mode\./);
+  assert.match(prompts[0].text, /^Switch to greybeard ultra mode\./);
   assert.ok(!prompts[0].text.includes('$ARGUMENTS'), 'template placeholder substituted');
 });
 
@@ -126,7 +126,7 @@ test('V2 commands keep attachments without offsets into the replaced prompt text
     agents: [{ name: 'reviewer', mention: { start: 0, end: 9 } }],
     skills: [{ name: 'test', mention: { start: 0, end: 9 } }],
   };
-  await added.commands['ponytail-review'].execute({ sessionID: 's', prompt, delivery: 'steer' });
+  await added.commands['greybeard-review'].execute({ sessionID: 's', prompt, delivery: 'steer' });
   assert.notEqual(prompts[0].text, prompt.text);
   assert.deepEqual(prompts[0].files, [{ path: 'src/a.ts' }]);
   assert.deepEqual(prompts[0].agents, [{ name: 'reviewer' }]);
@@ -136,10 +136,10 @@ test('V2 commands keep attachments without offsets into the replaced prompt text
 
 test('V2 command without $ARGUMENTS appends the typed input instead of dropping it (#1087)', async () => {
   const { added, prompts } = await setupV2();
-  assert.ok(added.commands['ponytail-review'], 'ponytail-review is registered');
-  await added.commands['ponytail-review'].execute({ sessionID: 's', prompt: { text: ' feature/login ' }, delivery: 'steer' });
-  await added.commands['ponytail-review'].execute({ sessionID: 's', prompt: { text: '  ' }, delivery: 'steer' });
-  await added.commands['ponytail-review'].execute({ sessionID: 's', prompt: {}, delivery: 'steer' });
+  assert.ok(added.commands['greybeard-review'], 'greybeard-review is registered');
+  await added.commands['greybeard-review'].execute({ sessionID: 's', prompt: { text: ' feature/login ' }, delivery: 'steer' });
+  await added.commands['greybeard-review'].execute({ sessionID: 's', prompt: { text: '  ' }, delivery: 'steer' });
+  await added.commands['greybeard-review'].execute({ sessionID: 's', prompt: {}, delivery: 'steer' });
   const [withInput, blank, missing] = prompts.map((p) => p.text);
   assert.ok(withInput.endsWith('\n\nfeature/login'), 'input appended, trimmed');
   assert.equal(withInput.slice(0, -'\n\nfeature/login'.length), blank, 'blank input leaves the template unchanged');
@@ -154,11 +154,11 @@ test('V2 context hook injects the ruleset, and stays silent when off', async () 
   await hooks.context(event);
   assert.equal(event.system.length, 1);
   assert.equal(event.system[0].type, 'text', 'V2 system entries are typed parts');
-  assert.match(event.system[0].text, /PONYTAIL MODE ACTIVE — level: full/);
+  assert.match(event.system[0].text, /GREYBEARD MODE ACTIVE — level: full/);
   assert.match(event.system[0].text, /lazy senior developer/);
 
   const { added } = await setupV2();
-  await added.commands.ponytail.execute({ sessionID: 's', prompt: { text: 'off' }, delivery: 'steer' });
+  await added.commands.greybeard.execute({ sessionID: 's', prompt: { text: 'off' }, delivery: 'steer' });
   ({ hooks } = await setupV2());
   const quiet = { system: [] };
   await hooks.context(quiet);
@@ -182,38 +182,38 @@ test('V2 compaction hook injects the same ruleset as context, and stays silent w
   assert.deepEqual(quiet.system, []);
 });
 
-test('V2 unsupported /ponytail arguments do not reset the current mode', async () => {
+test('V2 unsupported /greybeard arguments do not reset the current mode', async () => {
   const { added } = await setupV2();
   fs.writeFileSync(statePath, 'ultra');
-  await added.commands.ponytail.execute({ sessionID: 's', prompt: { text: 'status' }, delivery: 'steer' });
+  await added.commands.greybeard.execute({ sessionID: 's', prompt: { text: 'status' }, delivery: 'steer' });
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'ultra');
 });
 
-test('V2 bare /ponytail keeps a running level and switches an off session on (#639)', async () => {
+test('V2 bare /greybeard keeps a running level and switches an off session on (#639)', async () => {
   const { added } = await setupV2();
   fs.writeFileSync(statePath, 'ultra');
-  await added.commands.ponytail.execute({ sessionID: 's', prompt: { text: '' }, delivery: 'steer' });
+  await added.commands.greybeard.execute({ sessionID: 's', prompt: { text: '' }, delivery: 'steer' });
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'ultra', 'checking the level must not reset ultra');
 
   fs.writeFileSync(statePath, 'off');
-  await added.commands.ponytail.execute({ sessionID: 's', prompt: { text: '' }, delivery: 'steer' });
+  await added.commands.greybeard.execute({ sessionID: 's', prompt: { text: '' }, delivery: 'steer' });
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'full');
 });
 
 test('V1 and V2 share one mode file, so a level set under either API applies to both', async () => {
   const { added } = await setupV2();
-  await added.commands.ponytail.execute({ sessionID: 's', prompt: { text: 'lite' }, delivery: 'steer' });
+  await added.commands.greybeard.execute({ sessionID: 's', prompt: { text: 'lite' }, delivery: 'steer' });
   const v1 = await loadPlugin.server({});
   const output = { system: [] };
   await v1['experimental.chat.system.transform']({ model: {} }, output);
-  assert.match(output.system.join(''), /PONYTAIL MODE ACTIVE — level: lite/);
+  assert.match(output.system.join(''), /GREYBEARD MODE ACTIVE — level: lite/);
 
   // ...and the reverse: a level set by the V1 hook reaches the V2 injection.
-  await v1['command.execute.before']({ command: 'ponytail', arguments: 'ultra', sessionID: 's' });
+  await v1['command.execute.before']({ command: 'greybeard', arguments: 'ultra', sessionID: 's' });
   const { hooks } = await setupV2();
   const event = { system: [] };
   await hooks.context(event);
-  assert.match(event.system[0].text, /PONYTAIL MODE ACTIVE — level: ultra/);
+  assert.match(event.system[0].text, /GREYBEARD MODE ACTIVE — level: ultra/);
 });
 
 // ---------------------------------------------------------------- V1 ------
@@ -228,21 +228,21 @@ test('system.transform injects the ruleset at the default mode (full)', async ()
   const hooks = await loadPlugin.server({});
   const system = await transform(hooks);
   assert.equal(system.length, 1);
-  assert.match(system[0], /PONYTAIL MODE ACTIVE — level: full/);
+  assert.match(system[0], /GREYBEARD MODE ACTIVE — level: full/);
   assert.match(system[0], /lazy senior developer/);
 });
 
-test('command.execute.before persists /ponytail ultra, transform follows it', async () => {
+test('command.execute.before persists /greybeard ultra, transform follows it', async () => {
   const hooks = await loadPlugin.server({});
-  await hooks['command.execute.before']({ command: 'ponytail', arguments: 'ultra', sessionID: 's' });
+  await hooks['command.execute.before']({ command: 'greybeard', arguments: 'ultra', sessionID: 's' });
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'ultra');
   const system = await transform(hooks);
-  assert.match(system[0], /PONYTAIL MODE ACTIVE — level: ultra/);
+  assert.match(system[0], /GREYBEARD MODE ACTIVE — level: ultra/);
 });
 
-test('/ponytail off persists off and transform injects nothing', async () => {
+test('/greybeard off persists off and transform injects nothing', async () => {
   const hooks = await loadPlugin.server({});
-  await hooks['command.execute.before']({ command: 'ponytail', arguments: 'off', sessionID: 's' });
+  await hooks['command.execute.before']({ command: 'greybeard', arguments: 'off', sessionID: 's' });
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'off');
   const system = await transform(hooks);
   assert.deepEqual(system, []);
@@ -255,33 +255,33 @@ test('system.transform merges into existing system entry (Qwen compat, #296)', a
   await hooks['experimental.chat.system.transform']({ model: {} }, output);
   assert.equal(output.system.length, 1, 'must not add a second system entry');
   assert.match(output.system[0], /You are a helpful assistant/);
-  assert.match(output.system[0], /PONYTAIL MODE ACTIVE/);
+  assert.match(output.system[0], /GREYBEARD MODE ACTIVE/);
 });
 
-test('unsupported /ponytail arguments do not reset the current mode', async () => {
+test('unsupported /greybeard arguments do not reset the current mode', async () => {
   const hooks = await loadPlugin.server({});
   fs.writeFileSync(statePath, 'ultra');
-  await hooks['command.execute.before']({ command: 'ponytail', arguments: 'status', sessionID: 's' });
+  await hooks['command.execute.before']({ command: 'greybeard', arguments: 'status', sessionID: 's' });
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'ultra');
 });
 
-test('/ponytail review is not a level: the flag keeps the current mode (#736)', async () => {
+test('/greybeard review is not a level: the flag keeps the current mode (#736)', async () => {
   const hooks = await loadPlugin.server({});
   fs.writeFileSync(statePath, 'ultra');
-  await hooks['command.execute.before']({ command: 'ponytail', arguments: 'review', sessionID: 's' });
+  await hooks['command.execute.before']({ command: 'greybeard', arguments: 'review', sessionID: 's' });
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'ultra');
   // A review saved by an older version falls back to the default instead of latching.
   fs.writeFileSync(statePath, 'review');
-  assert.match((await transform(hooks))[0], /PONYTAIL MODE ACTIVE — level: full/);
+  assert.match((await transform(hooks))[0], /GREYBEARD MODE ACTIVE — level: full/);
 });
 
-test('/ponytail default lite saves the default and leaves the session level alone', async () => {
+test('/greybeard default lite saves the default and leaves the session level alone', async () => {
   const hooks = await loadPlugin.server({});
   fs.writeFileSync(statePath, 'ultra');
-  await hooks['command.execute.before']({ command: 'ponytail', arguments: 'default lite', sessionID: 's' });
-  assert.equal(JSON.parse(fs.readFileSync(path.join(tmp, 'ponytail', 'config.json'), 'utf8')).defaultMode, 'lite');
+  await hooks['command.execute.before']({ command: 'greybeard', arguments: 'default lite', sessionID: 's' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(tmp, 'greybeard', 'config.json'), 'utf8')).defaultMode, 'lite');
   assert.equal(fs.readFileSync(statePath, 'utf8'), 'ultra');
-  fs.rmSync(path.join(tmp, 'ponytail'), { recursive: true, force: true });
+  fs.rmSync(path.join(tmp, 'greybeard'), { recursive: true, force: true });
 });
 
 test('unrelated commands do not touch the flag', async () => {

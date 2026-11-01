@@ -5,11 +5,11 @@ import type { Band, Tokens } from './types'
 
 export { duration, elapsed, fmtTokens }
 
-// Same skip rules as ponytail-map.js: tests, vendored and generated code are not "reuse".
+// Same skip rules as greybeard-map.js: tests, vendored and generated code are not "reuse".
 const SKIP_DIR = /(^|\/)(node_modules|\.git|dist|build|out|vendor|venv|\.venv|__pycache__|coverage|\.next|target|migrations|fixtures|tests?|__tests__|spec)(\/|$)/
 const SKIP_FILE = /(^|\/)(test_[^/]*|[^/]*(_test|\.test|\.spec|\.gen|\.min|\.d)\.[a-z]+)$/
 
-// Top-level definitions per language, close to ponytail-map.js, plus plain JS functions.
+// Top-level definitions per language, close to greybeard-map.js, plus plain JS functions.
 // shortcut: regex, not a parser; nested and dynamic definitions are missed. Use tree-sitter if it matters.
 const DEFS: [RegExp, RegExp[]][] = [
   [/\.py$/, [/^(?:async\s+)?def\s+([A-Za-z]\w*)/gm, /^class\s+([A-Za-z]\w*)/gm]],
@@ -264,7 +264,7 @@ export function markdown(s: Snapshot): string {
     ['Reuse', `${s.reuse === null ? '–' : `${s.reuse}%`} (${s.reused} used, ${s.created} new)`],
     ['Callers open', `${s.callersOpen}`],
     ['Tests', s.tests],
-    ['ponytail level', s.level],
+    ['greybeard level', s.level],
     ['Session', `\`${s.session}\``],
   ]
   const cell = (v: string) => v.replace(/\|/g, '\\|')

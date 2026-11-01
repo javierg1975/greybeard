@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Paired arm comparison over tasks, with a sign test. No API calls.
 
-  python compare.py runs/<full> [runs/<quick> ...] --a ponytail --b ponytail2
+  python compare.py runs/<full> [runs/<quick> ...] --a greybeard --b greybeard2
 
 Every run dir's results.json (and answer.json, if answer.py ran) is merged. Each task is one
 pair: the per-task median (or rate) of arm A against arm B. Ties are dropped and the sign test
 asks whether B wins on more tasks than chance allows. Pair a candidate's quick run with the
 full run's reference arms, so iterating on the ruleset only pays for the candidate's cells.
 
-ponytail: sign test over tasks, not a mixed model. Coarse, but honest with n=2-3 per cell.
+greybeard: sign test over tasks, not a mixed model. Coarse, but honest with n=2-3 per cell.
 """
 import argparse, json, math, statistics
 from collections import defaultdict
@@ -52,8 +52,8 @@ def sign_p(wins, losses):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
-    ap.add_argument("--a", default="ponytail")
-    ap.add_argument("--b", default="ponytail2")
+    ap.add_argument("--a", default="greybeard")
+    ap.add_argument("--b", default="greybeard2")
     ap.add_argument("--tasks", help="comma list; default: every task both arms ran")
     args = ap.parse_args()
     by = defaultdict(list)

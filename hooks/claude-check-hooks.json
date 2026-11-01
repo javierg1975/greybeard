@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"require(require('path').join(process.env.CLAUDE_PLUGIN_ROOT.split(String.fromCharCode(92)).join('/'), 'hooks/greybeard-check.js'))\"",
+            "timeout": 300,
+            "statusMessage": "greybeard check..."
+          }
+        ]
+      }
+    ]
+  }
+}

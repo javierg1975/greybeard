@@ -9,7 +9,7 @@ const root = path.join(__dirname, '..');
 
 for (const scenario of ['blocked', 'failed', 'oversized', 'successful', 'disabled']) {
   test(`SessionStart preserves instructions when the optional map is ${scenario}`, (t) => {
-    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponytail activation '));
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'greybeard activation '));
     t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
     const hooks = path.join(temp, 'plugin', 'hooks');
     const workspace = path.join(temp, 'workspace');
@@ -25,12 +25,12 @@ for (const scenario of ['blocked', 'failed', 'oversized', 'successful', 'disable
         oversized: 'return "x".repeat(100000);',
         disabled: 'require("node:fs").writeFileSync("map-ran", "yes"); return "unexpected map";',
       }[scenario];
-      fs.writeFileSync(path.join(hooks, 'ponytail-map.js'),
+      fs.writeFileSync(path.join(hooks, 'greybeard-map.js'),
         `exports.buildMap = () => { ${body} };\n` +
         'if (require.main === module) process.stdout.write(exports.buildMap());\n');
     }
 
-    const result = spawnSync(process.execPath, [path.join(hooks, 'ponytail-activate.js')], {
+    const result = spawnSync(process.execPath, [path.join(hooks, 'greybeard-activate.js')], {
       cwd: workspace,
       input: '',
       encoding: 'utf8',
@@ -42,8 +42,8 @@ for (const scenario of ['blocked', 'failed', 'oversized', 'successful', 'disable
         PLUGIN_DATA: path.join(temp, 'state'),
         COPILOT_PLUGIN_DATA: '',
         XDG_CONFIG_HOME: path.join(temp, 'config'),
-        PONYTAIL_DEFAULT_MODE: 'full',
-        PONYTAIL_MAP: scenario === 'disabled' ? '0' : '1',
+        GREYBEARD_DEFAULT_MODE: 'full',
+        GREYBEARD_MAP: scenario === 'disabled' ? '0' : '1',
       },
     });
     assert.equal(result.error, undefined, 'optional mapping must finish before the hook timeout');
@@ -51,7 +51,7 @@ for (const scenario of ['blocked', 'failed', 'oversized', 'successful', 'disable
     assert.equal(result.stderr, '');
     const output = JSON.parse(result.stdout).hookSpecificOutput;
     assert.equal(output.hookEventName, 'SessionStart');
-    assert.match(output.additionalContext, /PONYTAIL MODE ACTIVE — level: full/);
+    assert.match(output.additionalContext, /GREYBEARD MODE ACTIVE — level: full/);
     assert.match(output.additionalContext, /Never cut:/);
     if (scenario === 'successful') {
       assert.match(output.additionalContext, /Codebase map[^]*lib\/: usefulHelper/);

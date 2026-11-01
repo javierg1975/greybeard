@@ -270,8 +270,8 @@ def main():
     ap.add_argument("--run", help="run dir to judge")
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--pair", nargs="+", help="run dirs; head-to-head replies of --a vs --b")
-    ap.add_argument("--a", default="ponytail")
-    ap.add_argument("--b", default="ponytail2")
+    ap.add_argument("--a", default="greybeard")
+    ap.add_argument("--b", default="greybeard2")
     args = ap.parse_args()
     if args.selftest_offline: sys.exit(selftest_offline())
     key = load_key()                                   # None -> judge.py uses the claude CLI
