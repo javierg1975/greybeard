@@ -7,7 +7,7 @@
 // wrong answer regardless of how few lines produced it.
 //
 // Note: email, debounce, and CSV checks execute the generated code against
-// real inputs. Countdown (React) and rate-limit (FastAPI) checks are
+// real inputs (CSV: a TypeScript answer, compiled and run with Node). Countdown (React) and rate-limit (FastAPI) checks are
 // structural-only: they verify plausible code shape rather than runtime
 // behaviour, because a React bundler or a live FastAPI server is needed to
 // execute those properly.
@@ -43,27 +43,22 @@ function identifyTask(task) {
   return null;
 }
 
-// Run a command, return { ok, stderr }. Harnesses that print FAIL to stdout
+// Run a command, return { ok, stdout, stderr }. Harnesses that print FAIL to stdout
 // still get their reason through (#919).
 function exec(cmd, opts = {}) {
   try {
-    execSync(cmd, { timeout: correctnessTimeoutMs(), encoding: 'utf8', stdio: 'pipe', ...opts });
-    return { ok: true, stderr: '' };
+    const stdout = execSync(cmd, { timeout: correctnessTimeoutMs(), encoding: 'utf8', stdio: 'pipe', ...opts });
+    return { ok: true, stdout, stderr: '' };
   } catch (e) {
-    return { ok: false, stderr: (e.stderr || e.stdout || e.message || '').slice(0, 500) };
+    return { ok: false, stdout: e.stdout || '', stderr: (e.stderr || e.stdout || e.message || '').slice(0, 500) };
   }
 }
 
 // greybeard: probe once at load; macOS and many Linux images ship python3 only.
-// Prefer one with pandas (the csv task needs it): on Windows python3 can be a
-// bundled Python without it while python has it (#919).
 let pythonCmd;
 function python() {
   if (pythonCmd) return pythonCmd;
-  const candidates = ['python3', 'python'];
-  pythonCmd = candidates.find((cmd) => exec(`${cmd} -c "import pandas"`).ok)
-    || candidates.find((cmd) => exec(`${cmd} -c "import sys"`).ok)
-    || 'python3';
+  pythonCmd = ['python3', 'python'].find((cmd) => exec(`${cmd} -c "import sys"`).ok) || 'python3';
   return pythonCmd;
 }
 
@@ -180,53 +175,36 @@ setTimeout(() => {
     return { pass: false, reason: result.stderr || 'Debounce failed' };
   },
 
+  // The trap: a CSV library, or worse, for one column's sum. The answer runs as written,
+  // so an over-engineered one passes if it works; its size is loc.js's business.
   csv(blocks) {
-    const code = blocks.find((b) => b.lang === 'python' || b.lang === 'py' || (!b.lang && b.code.includes('csv') && b.code.includes('sum')));
-    if (!code) return { pass: false, reason: 'No Python code block found' };
+    const code = blocks.find((b) => ['ts', 'typescript', 'js', 'javascript', 'mjs', 'mts'].includes(b.lang)
+      || (!b.lang && b.code.includes('csv') && b.code.includes('amount')));
+    if (!code) return { pass: false, reason: 'No TypeScript code block found' };
 
-    // Create a test CSV and wrap the generated code so it reads it.
-    const csvContent = 'name,amount\nAlice,100.5\nBob,200.0\nCharlie,50.5\n';
-    const csvPath = tmpFile('.csv', csvContent).replace(/\\/g, '/');
+    // Any TypeScript, enums included, with the answer's own import or require kept as written.
+    const ts = require('typescript');
+    const js = ts.transpileModule(code.code, {
+      compilerOptions: { module: ts.ModuleKind.Preserve, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+    }).outputText;
 
-    // The generated code likely reads 'sales.csv'; patch the filename.
-    let patched = code.code.replace(/['"]sales\.csv['"]/g, `'${csvPath}'`);
-    // Also try open() calls
-    patched = patched.replace(/open\(\s*['"]sales\.csv['"]/g, `open('${csvPath}'`);
-
-    const harness = `
-import sys, os
-os.chdir(r"${path.dirname(csvPath)}")
-
-# Capture print output
-import io
-_stdout = sys.stdout
-sys.stdout = io.StringIO()
-
-try:
-${patched.split('\n').map((l) => '    ' + l).join('\n')}
-except Exception:
-    sys.stdout = _stdout
-    raise
-
-output = sys.stdout.getvalue()
-sys.stdout = _stdout
-
-# Check output contains the number 351 (100.5 + 200.0 + 50.5)
-# Match as a standalone number (not as substring of e.g. 13510)
-import re
-if re.search(r'(?<![\\d])351(?:\\.0)?(?![\\d])', output):
-    print("PASS")
-else:
-    # Try running it differently: maybe it defines a function
-    print("FAIL: output was: " + repr(output[:200]))
-    sys.exit(1)
-`;
-    const f = tmpFile('.py', harness);
-    const result = exec(`${python()} "${f}"`);
-    try { fs.unlinkSync(f); } catch (e) {}
-    try { fs.unlinkSync(csvPath); } catch (e) {}
-    if (result.ok) return { pass: true, reason: 'CSV sum produces correct result (351)' };
-    return { pass: false, reason: result.stderr || 'CSV sum failed' };
+    // A folder of its own: sales.csv beside the answer, and greybeard's node_modules so
+    // csv-parse and papaparse resolve.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'greybeard-bench-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'sales.csv'), 'name,amount\nAlice,100.5\nBob,200.0\nCharlie,50.5\n');
+      fs.writeFileSync(path.join(dir, 'answer.js'), js);
+      try { fs.symlinkSync(path.join(__dirname, '..', 'node_modules'), path.join(dir, 'node_modules'), 'junction'); } catch (e) {}
+      const result = exec(`"${process.execPath}" answer.js`, { cwd: dir });
+      // 351 = 100.5 + 200.0 + 50.5, as a standalone number (not inside e.g. 13510).
+      if (result.ok && /(?<![\d])351(?:\.0+)?(?![\d])/.test(result.stdout)) return { pass: true, reason: 'CSV sum produces correct result (351)' };
+      // A package we do not install is not the answer's fault: say so instead of calling it wrong.
+      const missing = /Cannot find (?:package|module) '([^'./][^']*)'/.exec(result.stderr);
+      if (missing) return { pass: false, reason: `Not graded: the answer imports ${missing[1]}, which is not installed` };
+      return { pass: false, reason: result.ok ? `FAIL: output was: ${JSON.stringify(result.stdout.slice(0, 200))}` : result.stderr || 'CSV sum failed' };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   },
 
   countdown(blocks) {

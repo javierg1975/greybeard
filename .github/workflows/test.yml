@@ -23,8 +23,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Python deps for correctness checks
-        run: pip install pandas
+      # The CSV correctness check compiles TypeScript answers and runs them with csv-parse and papaparse available.
+      - name: Install dev dependencies
+        run: npm install --no-package-lock --no-audit --no-fund
 
       - name: Check rule copies
         run: node scripts/check-rule-copies.js

@@ -5,6 +5,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const correctness = require('../benchmarks/correctness');
 
 // Helper: wrap code in a fenced block and call the assertion with task vars.
@@ -88,71 +90,79 @@ test('debounce: bare unfenced arrow function is still scored (#65)', () => {
 
 // --- CSV sum ---
 
-test('csv: correct pandas one-liner passes', () => {
-  const result = check(
-    "Write Python code that reads sales.csv and sums the 'amount' column.",
-    'python',
-    `import pandas as pd
-df = pd.read_csv('sales.csv')
-print(df['amount'].sum())`,
-  );
-  assert.equal(result.pass, true);
+const CSV_TASK = "Write TypeScript code that reads sales.csv and sums the 'amount' column.";
+
+test('csv: a plain TypeScript answer passes', () => {
+  const result = check(CSV_TASK, 'ts', `import { readFileSync } from 'node:fs'
+const total: number = readFileSync('sales.csv', 'utf8').trim().split('\\n').slice(1)
+  .reduce((sum, line) => sum + Number(line.split(',')[1]), 0)
+console.log(total)`);
+  assert.equal(result.pass, true, result.reason);
   assert.equal(result.score, 1);
 });
 
+test('csv: TypeScript a strip-only runner refuses (an enum, require) still runs', () => {
+  const result = check(CSV_TASK, 'typescript', `enum Column { Name, Amount }
+const fs = require('fs')
+console.log(fs.readFileSync('sales.csv', 'utf8').trim().split('\\n').slice(1)
+  .reduce((sum: number, line: string) => sum + parseFloat(line.split(',')[Column.Amount]), 0))`);
+  assert.equal(result.pass, true, result.reason);
+});
+
+test('csv: the over-engineered answer the task baits still runs, with the CSV libraries installed', () => {
+  const result = check(CSV_TASK, 'ts', `import { parse } from 'csv-parse/sync'
+import { readFileSync } from 'fs'
+interface Sale { name: string; amount: string }
+const sales: Sale[] = parse(readFileSync('sales.csv'), { columns: true })
+console.log(sales.reduce((sum, s) => sum + parseFloat(s.amount), 0))`);
+  assert.equal(result.pass, true, result.reason);
+});
+
+test('csv: an answer that imports a package greybeard does not install is not graded, not called wrong', () => {
+  const result = check(CSV_TASK, 'ts', `import { readCSV } from 'danfojs-node'
+const df = await readCSV('sales.csv')
+console.log(df['amount'].sum())`);
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /^Not graded: the answer imports danfojs-node/);
+});
+
+test('csv: grading leaves node_modules in place', () => {
+  check(CSV_TASK, 'ts', `console.log(351)`);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'node_modules', 'typescript', 'package.json')));
+});
+
 test('csv: an exception in the code is reported, not swallowed (#919)', () => {
-  const result = check(
-    "Write Python code that reads sales.csv and sums the 'amount' column.",
-    'python',
-    `raise RuntimeError("boom")`,
-  );
+  const result = check(CSV_TASK, 'ts', `throw new Error("boom")`);
   assert.equal(result.pass, false);
   assert.match(result.reason, /boom/);
 });
 
 test('csv: code that prints wrong value fails', () => {
-  const result = check(
-    "Write Python code that reads sales.csv and sums the 'amount' column.",
-    'python',
-    `print(999)`,
-  );
+  const result = check(CSV_TASK, 'ts', `console.log(999)`);
   assert.equal(result.pass, false);
   assert.equal(result.score, 0);
 });
 
 test('csv: value containing 351 as substring fails (e.g. 13510)', () => {
-  const result = check(
-    "Write Python code that reads sales.csv and sums the 'amount' column.",
-    'python',
-    `print(13510)`,
-  );
+  const result = check(CSV_TASK, 'ts', `console.log(13510)`);
   assert.equal(result.pass, false);
   assert.equal(result.score, 0);
 });
 
-test('csv: timeout can be raised for slow pandas startup', () => {
+test('csv: timeout can be raised for a slow answer', () => {
   const previous = process.env.GREYBEARD_CORRECTNESS_TIMEOUT_MS;
+  const slow = `const start = Date.now()
+while (Date.now() - start < 50) {}
+console.log(351)`;
   try {
     process.env.GREYBEARD_CORRECTNESS_TIMEOUT_MS = '1';
-    const timedOut = check(
-      "Write Python code that reads sales.csv and sums the 'amount' column.",
-      'python',
-      `import time
-time.sleep(0.05)
-print(351)`,
-    );
+    const timedOut = check(CSV_TASK, 'ts', slow);
     assert.equal(timedOut.pass, false);
     assert.match(timedOut.reason, /ETIMEDOUT|timed out/i);
 
-    process.env.GREYBEARD_CORRECTNESS_TIMEOUT_MS = '1000';
-    const completed = check(
-      "Write Python code that reads sales.csv and sums the 'amount' column.",
-      'python',
-      `import time
-time.sleep(0.05)
-print(351)`,
-    );
-    assert.equal(completed.pass, true);
+    process.env.GREYBEARD_CORRECTNESS_TIMEOUT_MS = '5000';
+    const completed = check(CSV_TASK, 'ts', slow);
+    assert.equal(completed.pass, true, completed.reason);
     assert.equal(completed.score, 1);
   } finally {
     if (previous === undefined) delete process.env.GREYBEARD_CORRECTNESS_TIMEOUT_MS;

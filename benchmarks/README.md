@@ -34,7 +34,7 @@ npx promptfoo@latest view
 `--env-file ../.env` is required because promptfoo reads `.env` from the current
 directory (`benchmarks/`), not the repo root where the file lives.
 
-Tasks: email validator, JS debounce, CSV sum, React countdown, FastAPI rate-limit (see `promptfooconfig.yaml`). Single-shot completions, default temperature.
+Tasks: email validator, JS debounce, CSV sum, React countdown, FastAPI rate-limit (see `promptfooconfig.yaml`). Single-shot completions, default temperature. The CSV sum task asks for TypeScript since 2026-11-03; runs saved in `results/` before that asked for Python, so their CSV numbers are not comparable with later ones.
 
 ## Median results (10 runs, 2026-06-13; cost re-verified at 30 runs, 2026-06-17)
 
@@ -96,13 +96,13 @@ over-build and blocked tasks, can cost more on large completion-forced agentic r
 | `loc.js` | `loc` | Measurement - always passes, records line count |
 | `correctness.js` | `correct` | Gate - fails if generated code doesn't work |
 
-`correctness.js` extracts fenced code blocks and runs per-task checks (spawns Python/Node for email, debounce, CSV; structural regex for React and FastAPI). A broken one-liner that scores great on LOC will fail on correctness.
+`correctness.js` extracts fenced code blocks and runs per-task checks (spawns Python for email, Node for debounce and the TypeScript CSV answer; structural regex for React and FastAPI). A broken one-liner that scores great on LOC will fail on correctness.
 
 > **Note:** The React countdown and FastAPI rate-limit checks are keyword/structural only (no runtime execution), so they verify plausible structure rather than full correctness. The email, debounce, and CSV checks execute the code.
 
 ### Prerequisites
 
-Running the benchmark requires **Python 3**, **pandas**, and **Node.js ≥ 22.22.0** (promptfoo's engine constraint; see [Reproduce](#reproduce)).
+Running the benchmark requires **Python 3**, **Node.js ≥ 22.22.0** (promptfoo's engine constraint; see [Reproduce](#reproduce)) and `npm install` for the dev dependencies: the CSV check compiles answers with `typescript`, and `csv-parse` and `papaparse` are installed so an answer that reaches for one still runs. An answer that imports any other package is reported as "Not graded" with its name.
 
 ## Notes
 
