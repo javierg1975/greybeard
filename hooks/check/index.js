@@ -39,19 +39,37 @@ function changedFiles(root, staged) {
   return [...new Set(lines.split('\n').filter(Boolean))].map(f => path.join(root, f));
 }
 
+const format = (root, f) => `${path.relative(root, f.file)}:${f.line} ${f.rule} ${f.message}`;
+
+// What check last found in each file it checked, for the band (.algebra/band.algebra.md).
+// A file with nothing left drops out; a profile that was skipped leaves its files' entries alone.
+// shortcut: two checks finishing at once can lose one's write; the next check of that file restores it.
+function record(root, checked, findings) {
+  const file = path.join(stateDir(root), 'findings.json');
+  let before = {};
+  try { before = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first record */ }
+  const real = f => (fs.existsSync(f) ? fs.realpathSync(f) : f);
+  const now = Object.fromEntries(checked.map(f => [real(f), findings.filter(x => real(x.file) === real(f)).map(x => format(root, x))]));
+  const after = Object.fromEntries(Object.entries({ ...before, ...now }).filter(([, list]) => list.length));
+  try { fs.writeFileSync(file, JSON.stringify(after)); } catch { /* the band goes without; the findings still print */ }
+}
+
 function check(root, files) {
   const existing = files.map(f => path.resolve(root, f)).filter(f => fs.existsSync(f));
   const findings = [];
+  const checked = [];
   for (const profile of PROFILES) {
     const mine = existing.filter(f => profile.exts.includes(path.extname(f)));
     if (!mine.length || !profile.detect(root)) continue;
     try {
       findings.push(...profile.run({ root, files: mine, stateDir: stateDir(root) }));
+      checked.push(...mine);
     } catch (e) {
       process.stderr.write(`greybeard check: skipped ${profile.name}: ${e.message}\n`);
     }
   }
-  return findings.map(f => `${path.relative(root, f.file)}:${f.line} ${f.rule} ${f.message}`);
+  if (checked.length) record(root, checked, findings);
+  return findings.map(f => format(root, f));
 }
 
 function installHook(root) {

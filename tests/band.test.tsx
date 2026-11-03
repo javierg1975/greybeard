@@ -25,7 +25,20 @@ import {
   totalTokens,
   upsertCsv,
   CSV_HEADER,
+  NO_FINDINGS,
+  NO_TESTS,
+  advanceFindings,
+  failingNames,
+  findingKey,
+  irDrift,
+  isTestFile,
+  mergeRun,
+  runOf,
+  shortcuts,
+  suiteOf,
+  typesIn,
   webhookRequest,
+  withRun,
 } from '../hooks/band/metrics'
 
 describe('board', () => {
@@ -83,7 +96,8 @@ describe('metrics', () => {
   const BASE: Band = {
     level: 'full', model: 'claude-opus-5-5', cost: 31.9, spent: 3.1, turns: 6, turnCosts: [0.42], tokens: { input: 5000, output: 85_000, cacheRead: 1_100_000, cacheWrite: 10_000 },
     busyMs: 1_560_000, name: 'Fix the cart | totals, again', project: 'shop', session: '4c69e3db-57a0', transcript: '', reused: ['to_cents'], created: [],
-    removed: [], openCallers: [], tests: { state: 'pass', passed: 14 }, details: false,
+    removed: [], openCallers: [], tests: withRun(NO_TESTS, { failed: 0, names: [] }), touched: [], testEdited: false,
+    findings: NO_FINDINGS, types: [], drift: [], debtAdded: 0, debtResolved: 0, debtAt: '', details: false,
   }
 
   test('a band that starts again mid-session goes on from its row instead of from zero', () => {
@@ -155,7 +169,8 @@ describe('metrics', () => {
     expect(md).toContain('| Cost | $3.10 · last turn $0.42 · ⌀ $0.52 / turn |')
     expect(md).toContain('| Agent time | 26m 0s · ⌀ 4m 20s / turn |')
     expect(md).toContain('| Tokens | 1.2M (input 5k, output 85k, cache read 1.1M, cache write 10k) |')
-    expect(md).toContain('| Tests | 14 passed |')
+    expect(md).toContain('| Regressions | passing |')
+    expect(md).toContain('| Check findings | – |')
   })
 
   test('the CSV keeps one row per task and replaces it on every turn', () => {
@@ -171,13 +186,12 @@ describe('metrics', () => {
     expect(other.trim().split('\n').length).toBe(3)
   })
 
-  test('the desktop row is one SVG with real dividers, escaped and cut to fit', () => {
+  test('the desktop row is one SVG with real dividers, escaped and cut to fit, and no cost bars', () => {
     const svg = metricsSvg(
       [
-        { key: 'cost', label: 'cost', value: '$1.20', sub: '' },
         { key: 'callers', label: 'callers', value: '2 open', sub: 'a&b.py:1, a very long path/that/does/not/fit.py:9', tone: 'warning' },
+        { key: 'spent', label: 'spent', value: '$1.20', sub: '', tone: 'muted' },
       ],
-      [0.1, 0.4],
       300,
     )
     expect(svg.startsWith('<svg')).toBe(true)
@@ -185,7 +199,8 @@ describe('metrics', () => {
     expect(svg).toContain('a&amp;b.py')
     expect(svg).toContain('…')
     expect(svg).toContain('class="v warning"')
-    expect(svg.match(/<rect /g)?.length).toBe(2)
+    expect(svg).toContain('class="v muted"')
+    expect(svg).not.toContain('<rect ')
   })
 
   test('finds top-level definitions per language', () => {
@@ -214,9 +229,64 @@ describe('metrics', () => {
     expect(isTestCommand('npm test')).toBe(true)
     expect(isTestCommand('cd api && python -m pytest -q')).toBe(true)
     expect(isTestCommand('npm install')).toBe(false)
+    for (const cmd of ['sbt test', 'sbt --client test', 'sbt "testOnly klados.ViewSpec"', 'sbt clean test', 'scala-cli test .', 'mill core.test'])
+      expect(isTestCommand(cmd)).toBe(true)
+    expect(isTestCommand('sbt compile')).toBe(false)
+    expect(testCounts('[error] Failed: Total 14, Failed 2, Errors 1, Passed 11')).toEqual({ passed: 11, failed: 3 })
     expect(testCounts('===== 14 passed, 1 failed in 0.31s =====')).toEqual({ passed: 14, failed: 1 })
     expect(testCounts('ℹ pass 141\nℹ fail 1')).toEqual({ passed: 141, failed: 1 })
     expect(testCounts('ok')).toEqual({ passed: undefined, failed: undefined })
+  })
+
+  test('failing test names come from each runner, with colors stripped', () => {
+    expect(failingNames('not ok 3 - cart totals # time=1ms\n✖ rounds half up (2.1ms)\n  ● Cart › applies coupon\n')).toEqual(['cart totals', 'rounds half up', 'Cart › applies coupon'])
+    expect(failingNames('FAILED tests/test_cart.py::test_tax - assert 1 == 2\n==> X klados.ViewSpec.renders lanes  0.01s\n')).toEqual(['tests/test_cart.py::test_tax', 'klados.ViewSpec.renders lanes'])
+    expect(failingNames('\x1b[31m[info] - dismisses after 5s *** FAILED ***\x1b[0m')).toEqual(['dismisses after 5s'])
+    // A compile error is an error exit with nothing counted: one failure.
+    expect(runOf('[error] Compilation failed', true)).toEqual({ failed: 1, names: [] })
+    expect(runOf('ℹ pass 14\nℹ fail 0', false)).toEqual({ failed: 0, names: [] })
+  })
+
+  test('failures already there before the first edit are never new (.algebra/band.algebra.md)', () => {
+    const old = { failed: 1, names: ['csv: pandas one-liner'] }
+    // merge-semilattice: idempotent and commutative on names.
+    expect(mergeRun(old, old)).toEqual(old)
+    expect(mergeRun(old, { failed: 1, names: ['b'] }).names.sort()).toEqual(mergeRun({ failed: 1, names: ['b'] }, old).names.sort())
+    // baseline-never-new: the baseline run itself, or the same failures after an edit, read as passing.
+    expect(suiteOf(withRun(NO_TESTS, old))).toEqual({ kind: 'passing' })
+    const edited = { ...withRun(NO_TESTS, old), edited: true, stale: true }
+    expect(suiteOf(edited)).toEqual({ kind: 'stale' })
+    expect(suiteOf(withRun(edited, old))).toEqual({ kind: 'passing' })
+    // frozen-after-edit: a run after the edit changes last, never the baseline.
+    const broke = withRun(edited, { failed: 2, names: ['csv: pandas one-liner', 'cart totals'] })
+    expect(broke.baseline).toEqual(old)
+    expect(suiteOf(broke)).toEqual({ kind: 'new-failures', count: 1, names: ['cart totals'] })
+    // Without names, only a higher count says something is new.
+    const counted = withRun({ ...withRun(NO_TESTS, { failed: 2, names: [] }), edited: true }, { failed: 3, names: [] })
+    expect(suiteOf(counted)).toEqual({ kind: 'new-failures', count: 1, names: [] })
+    // No run before the first edit: failures may predate the session, so they are never called new.
+    expect(suiteOf(withRun({ ...NO_TESTS, edited: true }, old))).toEqual({ kind: 'failing', count: 1 })
+    expect(suiteOf(NO_TESTS)).toEqual({ kind: 'not-run' })
+  })
+
+  test('a finding that moves lines is the same finding, and fixed only grows', () => {
+    expect(findingKey('src/A.scala:41 wartremover:Var var is disabled')).toBe('src/A.scala wartremover:Var var is disabled')
+    const one = advanceFindings(NO_FINDINGS, ['src/A.scala:41 wartremover:Var var is disabled', 'src/A.scala:50 E198 unused'])
+    expect(one).toEqual({ known: true, open: ['src/A.scala wartremover:Var var is disabled', 'src/A.scala E198 unused'], first: 'src/A.scala:41 wartremover:Var var is disabled', fixed: 0 })
+    const moved = advanceFindings(one, ['src/A.scala:44 wartremover:Var var is disabled'])
+    expect(moved.open.length).toBe(1)
+    expect(moved.fixed).toBe(1)
+    expect(advanceFindings(moved, []).fixed).toBe(2)
+  })
+
+  test('new domain types no IR names are drift; shortcuts and test files are recognised', () => {
+    expect(typesIn('a.ts', 'export type Mode = "a" | "b"\nexport interface Cart {}\ntype Local = 1\nexport const x = 1')).toEqual(['Mode', 'Cart'])
+    expect(typesIn('A.scala', 'enum Shape:\n  case Circle\nfinal case class Email(v: String)\nopaque type Id = String\nobject Parse')).toEqual(['Shape', 'Email', 'Id'])
+    expect(irDrift(['Email', 'Shape', 'Id'], ['types:\n  - name: Email\n', 'Shape2'])).toEqual(['Shape', 'Id'])
+    expect(shortcuts('// shortcut: regex, not a parser\nx\n// shortcut: no retry')).toBe(2)
+    expect(['tests/cart.test.ts', 'src/test/scala/ViewSpec.scala', 'cart_test.go'].map(isTestFile)).toEqual([true, true, true])
+    expect(isTestFile('src/main/scala/View.scala')).toBe(false)
+    expect(defsIn('A.scala', 'object A:\n  def email(s: String) = s\n  private def hidden = 1\n    def local = 2')).toEqual(['email', 'hidden'])
   })
 
   test('shows the reuse share only once there is something to share, and a readable time', () => {
@@ -246,7 +316,7 @@ test('the band switches between compact and details on terminal and desktop', as
     expect(await ui.find({ key: 'level-ultra' })).toBeDefined()
     expect(await ui.find({ key: 'board' })).toBeDefined()
     if (surface === 'desktop') expect(await ui.find({ type: 'Svg' })).toBeDefined()
-    else expect(await ui.find({ type: 'Text', text: /cost/ })).toBeDefined()
+    else expect(await ui.find({ type: 'Text', text: /spent/ })).toBeDefined()
 
     await ui.press({ key: 'details' })
     expect(await ui.find({ key: 'level' })).toBeDefined()
@@ -274,8 +344,9 @@ test('the details view has its line without empty rows, and off the terminal its
     await ui.press({ key: 'details' })
     expect(await ui.find({ type: 'Text', text: /─/ })).toBeDefined()
     expect((await ui.find({ type: 'Box' }))?.props.gap).toBe(0)
-    const cost = (await ui.find({ key: 'cost' }))?.props
-    expect(surface === 'terminal' ? cost?.width : cost?.flexGrow).toBe(surface === 'terminal' ? 31 : 1)
+    // A fresh session has only the spend meter to show, so it takes the row.
+    const spent = (await ui.find({ key: 'spent' }))?.props
+    expect(surface === 'terminal' ? spent?.width : spent?.flexGrow).toBe(surface === 'terminal' ? 98 : 1)
     // The view is stored, so the next surface would start in details: switch back.
     await ui.press({ key: 'details' })
     await ui.unmount()
@@ -500,21 +571,81 @@ test('copy hands the task to the clipboard as Markdown', async ($, on) => {
   await ui.unmount()
 })
 
-test('a test run shows its count, and an edit in the project after it marks the tests stale', async ($, on) => {
+test('the band reports new failures against the runs before the first edit, in words with no glyphs', async ($, on) => {
   mock.clock(on)
   on('session.repo', () => ({ value: { root: '/repo' } }) as never)
-  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ℹ pass 14', stderr: '', interrupted: false }, text: 'ℹ pass 14' }) as never)
+  let output = 'ℹ pass 13\nℹ fail 1\n✖ csv: pandas one-liner (3ms)'
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: output, stderr: '', interrupted: false }, text: output, isError: true }) as never)
   on('tool.call', { tool: 'Edit' }, () => ({ result: {}, text: 'ok' }) as never)
   const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
 
+  // A failure before any edit is the baseline: nothing to report.
   await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
-  expect(await ui.find({ type: 'Text', text: /✓ 14 tests/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /fail/ })).toBeUndefined()
 
   // A scratch script outside the project changes nothing (#1300).
   await $.tool.call({ tool: 'Edit', file_path: '/tmp/scratch/drive.py', old_string: 'a = 1', new_string: 'def send():\n  pass', replace_all: false } as never)
-  expect(await ui.find({ type: 'Text', text: /✓ 14 tests/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /stale/ })).toBeUndefined()
 
-  await $.tool.call({ tool: 'Edit', file_path: '/repo/cart.py', old_string: 'a = 1', new_string: 'a = 2', replace_all: false } as never)
-  expect(await ui.find({ type: 'Text', text: /no test since change/ })).toBeDefined()
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/cart.ts', old_string: 'a = 1', new_string: '// shortcut: no tax\na = 2', replace_all: false } as never)
+  expect(await ui.find({ type: 'Text', text: /^tests stale$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\+1 debt/ })).toBeDefined()
+
+  output = 'ℹ pass 12\nℹ fail 2\n✖ csv: pandas one-liner (3ms)\n✖ cart totals (1ms)'
+  await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
+  expect(await ui.find({ type: 'Text', text: /^1 new failure$/ })).toBeDefined()
+
+  output = 'ℹ pass 13\nℹ fail 1\n✖ csv: pandas one-liner (3ms)'
+  await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
+  expect(await ui.find({ type: 'Text', text: /new failure/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /[✓✗⚠]/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('at turn end the band reads check findings for touched files and IR drift, starting no compiler', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }))
+  on('session.repo', () => ({ value: { root: '/repo' } }) as never)
+  on('session.id', () => ({ value: 's1' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.usage', () => ({ value: { startedAt: 0, cost: { usd: 0.5 } } }) as never)
+  const ran: string[] = []
+  on('process.run', ($, e) => {
+    ran.push(e.argv.join(' '))
+    const gitPath = e.argv.includes('--git-path')
+    return { value: { exitCode: gitPath ? 0 : 1, stdout: gitPath ? '/repo/.git/greybeard/findings.json\n' : '', stderr: '' } } as never
+  })
+  const findings: Record<string, string[]> = { '/repo/src/A.scala': ['src/A.scala:41 wartremover:Var var is disabled'], '/repo/src/Other.scala': ['src/Other.scala:1 E198 unused'] }
+  let ir = 'types:\n  - name: Lane\n'
+  on('fs.read', ($, e) => {
+    if (e.path === '/repo/.git/greybeard/findings.json') return { value: JSON.stringify(findings) }
+    if (e.path === '/repo/.algebra/feed.algebra.md') return { value: ir }
+    return { deny: 'missing' } as never
+  })
+  on('fs.list', ($, e) => ({ value: e.path === '/repo/.algebra' ? [{ name: 'feed.algebra.md', kind: 'file' }] : [] }) as never)
+  on('fs.write', () => ({ value: undefined }))
+  on('tool.call', { tool: 'Edit' }, () => ({ result: {}, text: 'ok' }) as never)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ℹ pass 3\nℹ fail 0', stderr: '', interrupted: false }, text: 'ℹ pass 3\nℹ fail 0' }) as never)
+  on('turn.complete', () => ({ text: '' }))
+  const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
+
+  await $.tool.call({ tool: 'Edit', file_path: '/repo/src/A.scala', old_string: 'x', new_string: 'enum ToastLevel:\n  case Info\ncase class Lane(n: Int)', replace_all: false } as never)
+  await $.turn.complete({ answer: '', durationMs: 1000 } as never)
+  // Only the touched file's finding counts; Lane is in an IR, ToastLevel is not.
+  expect(await ui.find({ type: 'Text', text: /^1 finding$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^IR drift$/ })).toBeDefined()
+  await ui.press({ key: 'details' })
+  expect(await ui.find({ type: 'Text', text: /wartremover:Var/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /ToastLevel not in/ })).toBeDefined()
+  await ui.press({ key: 'details' })
+  expect(ran.some(c => /\b(tsc|sbt)\b|greybeard check/.test(c))).toBe(false)
+
+  // The finding is fixed and the type gets its IR: the session reads clean once tests pass.
+  findings['/repo/src/A.scala'] = []
+  ir = 'Lane ToastLevel'
+  await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1000 } as never)
+  expect(await ui.find({ type: 'Text', text: /^clean$/ })).toBeDefined()
   await ui.unmount()
 })

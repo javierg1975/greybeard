@@ -47,3 +47,29 @@ test('hook returns at once for a docs edit and for empty stdin', () => {
     assert.equal(r.stderr, '');
   }
 });
+
+test('check records its findings per file for the band, and a skipped profile leaves them alone', () => {
+  const { PROFILES } = require('../hooks/check');
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gb-record-')));
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  const a = path.join(dir, 'a.fake');
+  fs.writeFileSync(a, 'x\n');
+  let found = [{ file: a, line: 3, rule: 'no-let', message: 'use const' }];
+  let fail = false;
+  PROFILES.push({ name: 'fake', exts: ['.fake'], detect: () => true, run: () => { if (fail) throw new Error('tool missing'); return found; } });
+  const recorded = () => JSON.parse(fs.readFileSync(path.join(dir, '.git', 'greybeard', 'findings.json'), 'utf8'));
+  try {
+    assert.deepEqual(check(dir, ['a.fake']), ['a.fake:3 no-let use const']);
+    assert.deepEqual(recorded(), { [a]: ['a.fake:3 no-let use const'] });
+    fail = true;
+    check(dir, ['a.fake']);
+    assert.deepEqual(recorded(), { [a]: ['a.fake:3 no-let use const'] }, 'a skipped profile proves nothing about the file');
+    fail = false;
+    found = [];
+    check(dir, ['a.fake']);
+    assert.deepEqual(recorded(), {}, 'a file with nothing left drops out');
+  } finally {
+    PROFILES.pop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

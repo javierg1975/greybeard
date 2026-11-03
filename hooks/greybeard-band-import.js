@@ -11,7 +11,7 @@ const { StringDecoder } = require('string_decoder');
 const { getClaudeDir } = require('./greybeard-config');
 
 // The band's columns (CSV_HEADER in hooks/band/metrics.ts; a test keeps the two equal).
-const CSV_HEADER = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,reuse_pct,reused,new,callers_open,tests,level,model';
+const CSV_HEADER = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,reuse_pct,reused,new,callers_open,tests,level,model,findings_open,findings_fixed,ir_drift,debt_added,debt_resolved';
 
 // USD per million tokens from https://platform.claude.com/docs/en/about-claude/pricing, checked
 // 2026-10-17: [input, 5-minute cache write, 1-hour cache write, cache read, output]. Opus 5.5 and
@@ -182,7 +182,7 @@ const field = v => { const s = v === null || v === undefined ? '' : String(v); r
 
 function csvRow(sessionId, project, s) {
   return [`${sessionId.slice(0, 8)}-${s.startedMs}`, stamp(s.startedMs), project, s.name, s.cost === null ? '' : s.cost.toFixed(2), s.turns,
-    (s.agentMs / 60000).toFixed(1), s.tokens, s.output, '', '', '', '', '', 'import', s.model].map(field).join(',');
+    (s.agentMs / 60000).toFixed(1), s.tokens, s.output, '', '', '', '', '', 'import', s.model, '', '', '', '', ''].map(field).join(',');
 }
 
 // New rows go in after the ledger's own: a newer header replaces an older one, and a session

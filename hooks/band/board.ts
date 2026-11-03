@@ -352,7 +352,7 @@ const APP = `(function () {
   }
 
   function pill(text) {
-    var kind = /passed/.test(text) ? 'ok' : /failed/.test(text) ? 'bad' : /stale/.test(text) ? 'warn' : ''
+    var kind = /pass/.test(text) ? 'ok' : /new fail|failed/.test(text) ? 'bad' : /stale|failing/.test(text) ? 'warn' : ''
     var p = h('span', 'pill ' + kind); p.append(h('i'), document.createTextNode(text || 'not run')); return p
   }
 

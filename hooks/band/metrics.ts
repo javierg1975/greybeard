@@ -1,7 +1,7 @@
 // Pure helpers for the band: no `$`, so the tests call them directly.
 
 import { duration, elapsed, fmtTokens, parseCsv } from './board'
-import type { Band, Tokens } from './types'
+import type { Band, Findings, Run, Suite, Tests, Tokens } from './types'
 
 export { duration, elapsed, fmtTokens }
 
@@ -20,7 +20,29 @@ const DEFS: [RegExp, RegExp[]][] = [
   [/\.go$/, [/^func\s+(?:\([^)]*\)\s*)?([A-Za-z]\w*)/gm]],
   [/\.rs$/, [/^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/gm]],
   [/\.rb$/, [/^\s*def\s+(?:self\.)?([A-Za-z]\w*[?!]?)/gm]],
+  [/\.scala$/, [/^ {0,2}(?:(?:private|protected|final|override|inline|implicit|transparent)\s+)*def\s+([A-Za-z_]\w*)/gm]],
 ]
+
+// Domain types a file defines, for IR drift: the languages greybeard writes IRs for.
+const TYPES: [RegExp, RegExp][] = [
+  [/\.[cm]?tsx?$/, /^export\s+(?:declare\s+)?(?:abstract\s+)?(?:interface|type|enum|class)\s+([A-Za-z_$][\w$]*)/gm],
+  [/\.scala$/, /^ {0,2}(?:(?:final|sealed|abstract|case|opaque|open)\s+)*(?:class|trait|enum|type)\s+([A-Z]\w*)/gm],
+]
+
+export function typesIn(file: string, text: string): string[] {
+  const re = TYPES.find(([ext]) => ext.test(file))?.[1]
+  return re ? [...new Set([...text.matchAll(re)].map(m => m[1] ?? '').filter(Boolean))] : []
+}
+
+// New type names no IR mentions; IR texts are the .algebra/*.md files of the project.
+export const irDrift = (types: string[], irs: string[]) =>
+  types.filter(t => !irs.some(ir => new RegExp(`(?<![\\w$])${t.replace(/\$/g, '\\$')}(?![\\w$])`).test(ir)))
+
+// A test file by the usual names, so an edit to one counts as testing the new logic.
+export const isTestFile = (file: string) => /(^|\/)(tests?|__tests__|spec)\//.test(file) || /(_test|\.test|\.spec|Spec|Suite|Test)\.[a-z]+$/.test(file)
+
+// `shortcut:` comments in a piece of text: greybeard's marker for a deliberate limit.
+export const shortcuts = (text: string) => (text.match(/\bshortcut:/g) ?? []).length
 
 // Lines worth a closer look; the per-language regexes above decide.
 export const GREP_DEFS = '^[[:space:]]*(export|async|def|class|function|func|pub|fn)[[:space:]]'
@@ -83,23 +105,103 @@ export function inProject(file: string, root: string): boolean {
   return f === r || f.startsWith(`${r}/`)
 }
 
-const TEST_CMD = /\b(npm (run )?test|pnpm (run )?test|yarn test|bun test|npx (jest|vitest)|jest|vitest|pytest|python3? -m pytest|go test|cargo test|mvn test|gradle test|rspec|phpunit|dotnet test|node --test|deno test|make test)\b/
+const TEST_CMD = /\b(npm (run )?test|pnpm (run )?test|yarn test|bun test|npx (jest|vitest)|jest|vitest|pytest|python3? -m pytest|go test|cargo test|mvn test|gradle test|rspec|phpunit|dotnet test|node --test|deno test|make test|scala-cli test|mill [\w.]+\.test)\b|\bsbt\b[^|;&]*\btest(Only|Quick)?\b/
 
 export const isTestCommand = (command: string) => TEST_CMD.test(command)
 
-// Pass and fail counts from common runners: pytest, jest/vitest, cargo, node --test, TAP.
-export function testCounts(output: string): { passed?: number; failed?: number } {
+const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g
+
+// Pass and fail counts from common runners: pytest, jest/vitest, cargo, node --test, TAP, sbt.
+export function testCounts(raw: string): { passed?: number; failed?: number } {
+  const output = raw.replace(ANSI, '')
   const num = (re: RegExp) => {
     const m = re.exec(output)
     return m ? Number(m[1]) : undefined
   }
+  // sbt: "Failed: Total 14, Failed 2, Errors 1, Passed 11"; an error is a failure too.
+  const sbt = /Total \d+, Failed (\d+), Errors (\d+), Passed (\d+)/.exec(output)
   return {
-    passed: num(/(\d+) (?:passed|passing)\b/) ?? num(/(?:ℹ |# )pass (\d+)/),
-    failed: num(/(\d+) (?:failed|failing)\b/) ?? num(/(?:ℹ |# )fail (\d+)/),
+    passed: (sbt ? Number(sbt[3]) : undefined) ?? num(/(\d+) (?:passed|passing)\b/) ?? num(/(?:ℹ |# )pass (\d+)/),
+    failed: (sbt ? Number(sbt[1]) + Number(sbt[2]) : undefined) ?? num(/(\d+) (?:failed|failing)\b/) ?? num(/(?:ℹ |# )fail (\d+)/),
   }
 }
 
-export type Col = { key: string; label: string; value: string; sub: string; tone?: 'warning' | 'success' | 'error' }
+// Failing test names, per runner. The first group of each pattern is the name.
+const FAILING = [
+  /^not ok \d+ - (.+?)(?:\s+#.*)?$/gm, // TAP (node --test --test-reporter=tap)
+  /^\s*✖ (.+?)(?: \([\d.]+m?s\))?$/gm, // node --test spec reporter
+  /^\s*● (.+?)$/gm, // jest
+  /^\s*(?:×|FAIL) +(.+? > .+?)(?: \d+ms)?$/gm, // vitest
+  /^FAILED (\S+)/gm, // pytest -q summary
+  /^==> X (.+?)\s+[\d.]+s/gm, // munit
+  /^\[info\] - (.+?) \*\*\* FAILED \*\*\*/gm, // scalatest
+  /^--- FAIL: (\S+)/gm, // go test
+  /^test (\S+) \.\.\. FAILED$/gm, // cargo test
+]
+
+export function failingNames(raw: string): string[] {
+  const output = raw.replace(ANSI, '')
+  return [...new Set(FAILING.flatMap(re => [...output.matchAll(re)].map(m => (m[1] ?? '').trim())).filter(Boolean))]
+}
+
+// One test command's report. An error exit with no failure counted (a compile error) is one failure.
+// shortcut: that one failure has no name, so a suite that stops compiling reads as "1 new failure".
+export function runOf(output: string, isError: boolean): Run {
+  const names = failingNames(output)
+  const failed = Math.max(testCounts(output).failed ?? 0, names.length, isError ? 1 : 0)
+  return { failed, names }
+}
+
+export const mergeRun = (a: Run, b: Run): Run => ({ failed: Math.max(a.failed, b.failed), names: [...new Set([...a.names, ...b.names])] })
+
+export const NO_TESTS: Tests = { edited: false, stale: false }
+
+// A run before the first code edit joins the baseline: nothing the agent wrote can have caused its failures.
+export const withRun = (t: Tests, run: Run): Tests => ({
+  ...t,
+  last: run,
+  stale: false,
+  baseline: t.edited ? t.baseline : t.baseline ? mergeRun(t.baseline, run) : run,
+})
+
+export function suiteOf(t: Tests): Suite {
+  if (t.last === undefined) return { kind: 'not-run' }
+  if (t.stale) return { kind: 'stale' }
+  const last = t.last
+  if (last.failed === 0) return { kind: 'passing' }
+  if (t.baseline === undefined) return { kind: 'failing', count: last.failed }
+  const base = t.baseline
+  // Names when both runs printed them; else only a higher count says something is new.
+  const named = last.names.length > 0 && (base.names.length > 0 || base.failed === 0)
+  const fresh = named ? last.names.filter(n => !base.names.includes(n)) : []
+  const count = named ? fresh.length : Math.max(0, last.failed - base.failed)
+  return count > 0 ? { kind: 'new-failures', count, names: fresh } : { kind: 'passing' }
+}
+
+export const suiteLabel = (s: Suite) =>
+  s.kind === 'new-failures' ? `${s.count} new ${s.count === 1 ? 'failure' : 'failures'}` : s.kind === 'failing' ? `${s.count} failing` : s.kind === 'not-run' ? 'not run' : s.kind
+
+export const NO_FINDINGS: Findings = { known: false, open: [], first: '', fixed: 0 }
+
+// "src/A.scala:41 wartremover:Var var is disabled" without its line, so a moved finding stays the same one.
+export const findingKey = (line: string) => line.replace(/^(\S+?):\d+ /, '$1 ')
+
+export function advanceFindings(f: Findings, lines: string[]): Findings {
+  const open = [...new Set(lines.map(findingKey))]
+  return { known: true, open, first: lines[0] ?? '', fixed: f.fixed + f.open.filter(k => !open.includes(k)).length }
+}
+
+// The lines of findings.json (file -> check lines) that belong to the files the session touched.
+export function findingsFor(json: string, touched: string[]): string[] {
+  try {
+    const all = JSON.parse(json) as Record<string, unknown>
+    return touched.flatMap(f => (Array.isArray(all[f]) ? (all[f] as unknown[]).filter((l): l is string => typeof l === 'string') : []))
+  } catch {
+    return []
+  }
+}
+
+export type Col = { key: string; label: string; value: string; sub: string; tone?: 'warning' | 'success' | 'error' | 'muted' }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const fit = (s: string, max: number) => (s.length > max ? `${s.slice(0, Math.max(1, max - 1))}…` : s)
@@ -107,13 +209,12 @@ const fit = (s: string, max: number) => (s.length > max ? `${s.slice(0, Math.max
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
 // The image cannot read the app's theme, so it follows the system's.
 // shortcut: an app theme that differs from the system theme gets the wrong text color; pass the theme in if that bites.
-const STYLE = `.l,.s{fill:#87867f;font:12px ${FONT}}.v{fill:#1f1e1d;font:600 16px ${FONT}}.d{stroke:#1f1e1d;stroke-opacity:.12}.b{fill:#87867f}.warning{fill:#a86400}.success{fill:#2e7d32}.error{fill:#c62828}@media (prefers-color-scheme:dark){.v{fill:#ecebe6}.d{stroke:#fff;stroke-opacity:.14}.warning{fill:#e3a03d}.success{fill:#6abf69}.error{fill:#ef6a5a}}`
+const STYLE = `.l,.s{fill:#87867f;font:12px ${FONT}}.v{fill:#1f1e1d;font:600 16px ${FONT}}.d{stroke:#1f1e1d;stroke-opacity:.12}.v.muted{fill:#87867f;font-weight:500}.warning{fill:#a86400}.success{fill:#2e7d32}.error{fill:#c62828}@media (prefers-color-scheme:dark){.v{fill:#ecebe6}.d{stroke:#fff;stroke-opacity:.14}.warning{fill:#e3a03d}.success{fill:#6abf69}.error{fill:#ef6a5a}}`
 
 // The details row as one SVG for surfaces that draw it: real 1px dividers and exact columns.
-export function metricsSvg(cols: Col[], turnCosts: number[], width = 720): string {
+export function metricsSvg(cols: Col[], width = 720): string {
   const height = 64
   const colW = width / Math.max(1, cols.length)
-  const max = Math.max(...turnCosts, 0)
   let body = `<line class="d" x1="0" y1="0.5" x2="${width}" y2="0.5"/>`
   cols.forEach((c, i) => {
     const x = i * colW + (i === 0 ? 0 : 12)
@@ -122,14 +223,6 @@ export function metricsSvg(cols: Col[], turnCosts: number[], width = 720): strin
     body += `<text class="l" x="${x}" y="24">${esc(c.label)}</text>`
     body += `<text class="v${tone}" x="${x}" y="44">${esc(fit(c.value, Math.floor((colW - 16) / 9)))}</text>`
     if (c.sub) body += `<text class="s${c.tone === 'warning' ? tone : ''}" x="${x}" y="61">${esc(fit(c.sub, Math.floor((colW - 16) / 6.2)))}</text>`
-    if (c.key === 'cost' && turnCosts.length > 1 && max > 0) {
-      const bars = turnCosts.slice(-10)
-      const x0 = (i + 1) * colW - 16 - bars.length * 5
-      bars.forEach((v, j) => {
-        const h = Math.max(1, Math.round((v / max) * 16))
-        body += `<rect class="b" x="${x0 + j * 5}" y="${44 - h}" width="3" height="${h}" rx="1"/>`
-      })
-    }
   })
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${STYLE}</style>${body}</svg>`
 }
@@ -153,8 +246,6 @@ export const stamp = (ms: number) => {
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
-export const testsLabel = (t: Band['tests']) =>
-  t.state === 'pass' ? `${t.passed ?? ''} passed`.trim() : t.state === 'fail' ? `${t.failed ?? ''} failed`.trim() : t.state === 'stale' ? 'stale' : 'not run'
 
 // Claude Code writes the session's sidebar name into its transcript on every rename.
 export const TITLE_RECORD = '"type":"custom-title"'
@@ -203,6 +294,11 @@ export type Snapshot = {
   created: number
   callersOpen: number
   tests: string
+  findingsOpen: number | null
+  findingsFixed: number
+  irDrift: number
+  debtAdded: number
+  debtResolved: number
 }
 
 // A task's row in the ledger: the session and when it started (a /clear starts a new one).
@@ -245,7 +341,12 @@ export function snapshot(b: Band, startedAt: number): Snapshot {
     reused: b.reused.length,
     created: b.created.length,
     callersOpen: b.openCallers.length,
-    tests: testsLabel(b.tests),
+    tests: suiteLabel(suiteOf(b.tests)),
+    findingsOpen: b.findings.known ? b.findings.open.length : null,
+    findingsFixed: b.findings.fixed,
+    irDrift: b.drift.length,
+    debtAdded: b.debtAdded,
+    debtResolved: b.debtResolved,
   }
 }
 
@@ -262,8 +363,11 @@ export function markdown(s: Snapshot): string {
     ['Agent time', `${elapsed(s.agentMs)} · ⌀ ${elapsed(per(s.agentMs, s.turns))} / turn`],
     ['Tokens', `${fmtTokens(totalTokens(t))} (input ${fmtTokens(t.input)}, output ${fmtTokens(t.output)}, cache read ${fmtTokens(t.cacheRead)}, cache write ${fmtTokens(t.cacheWrite)})`],
     ['Reuse', `${s.reuse === null ? '–' : `${s.reuse}%`} (${s.reused} used, ${s.created} new)`],
+    ['Check findings', s.findingsOpen === null ? '–' : `${s.findingsOpen} open, ${s.findingsFixed} fixed`],
+    ['IR drift', `${s.irDrift}`],
     ['Callers open', `${s.callersOpen}`],
-    ['Tests', s.tests],
+    ['Regressions', s.tests],
+    ['Shortcuts', `${s.debtAdded} added, ${s.debtResolved} resolved`],
     ['greybeard level', s.level],
     ['Session', `\`${s.session}\``],
   ]
@@ -271,7 +375,7 @@ export function markdown(s: Snapshot): string {
   return [`## ${cell(s.name || 'Untitled session')}`, '', '| | |', '|---|---|', ...rows.map(([k, v]) => `| ${k} | ${cell(v ?? '')} |`)].join('\n')
 }
 
-export const CSV_HEADER = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,reuse_pct,reused,new,callers_open,tests,level,model'
+export const CSV_HEADER = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,reuse_pct,reused,new,callers_open,tests,level,model,findings_open,findings_fixed,ir_drift,debt_added,debt_resolved'
 
 const csvField = (v: string | number | null) => {
   const s = v === null ? '' : String(v)
@@ -279,7 +383,8 @@ const csvField = (v: string | number | null) => {
 }
 
 export const csvRow = (s: Snapshot) =>
-  [s.key, s.started, s.project, s.name, s.cost.toFixed(2), s.turns, (s.agentMs / 60000).toFixed(1), totalTokens(s.tokens), s.tokens.output, s.reuse, s.reused, s.created, s.callersOpen, s.tests, s.level, s.model]
+  [s.key, s.started, s.project, s.name, s.cost.toFixed(2), s.turns, (s.agentMs / 60000).toFixed(1), totalTokens(s.tokens), s.tokens.output, s.reuse, s.reused, s.created, s.callersOpen, s.tests, s.level, s.model,
+    s.findingsOpen, s.findingsFixed, s.irDrift, s.debtAdded, s.debtResolved]
     .map(csvField)
     .join(',')
 

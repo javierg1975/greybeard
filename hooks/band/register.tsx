@@ -6,18 +6,23 @@ import type { Band } from './types'
 import type { Col } from './metrics'
 import {
   GREP_DEFS,
+  NO_FINDINGS,
+  NO_TESTS,
   NO_TOKENS,
   addTokens,
   addedLines,
+  advanceFindings,
   callsIn,
   defsIn,
   elapsed,
-  fmtTokens,
+  findingsFor,
   hits,
   inProject,
+  irDrift,
   isCode,
   isSource,
   isTestCommand,
+  isTestFile,
   mainModel,
   markdown,
   metricsSvg,
@@ -25,15 +30,18 @@ import {
   parseDefs,
   percent,
   resume,
+  runOf,
+  shortcuts,
   snapshot,
-  testCounts,
   sessionTitle,
+  suiteLabel,
+  suiteOf,
   taskKey,
-  testsLabel,
   TITLE_RECORD,
-  totalTokens,
+  typesIn,
   upsertCsv,
   webhookRequest,
+  withRun,
 } from './metrics'
 
 const LEVELS = ['off', 'lite', 'full', 'ultra']
@@ -54,7 +62,15 @@ const EMPTY: Band = {
   created: [],
   removed: [],
   openCallers: [],
-  tests: { state: 'none' },
+  tests: NO_TESTS,
+  touched: [],
+  testEdited: false,
+  findings: NO_FINDINGS,
+  types: [],
+  drift: [],
+  debtAdded: 0,
+  debtResolved: 0,
+  debtAt: '',
   details: false,
 }
 // The counters of one task: what a new session or /clear starts over.
@@ -70,11 +86,23 @@ const TASK = {
   created: [],
   removed: [],
   openCallers: [],
-  tests: { state: 'none' as const },
+  tests: NO_TESTS,
+  touched: [],
+  testEdited: false,
+  findings: NO_FINDINGS,
+  types: [],
+  drift: [],
+  debtAdded: 0,
+  debtResolved: 0,
+  debtAt: '',
 }
 const band = atom({ plugin: 'greybeard', key: 'band' } as const, EMPTY)
-// State kept from an older version of the band lacks newer fields.
-const load = async ($: EngineInterface): Promise<Band> => ({ ...EMPTY, ...(await read($, band)) })
+// State kept from an older version of the band lacks newer fields, and its tests had another shape.
+const current = (b: Band): Band => {
+  const x = { ...EMPTY, ...b }
+  return 'edited' in x.tests ? x : { ...x, tests: NO_TESTS }
+}
+const load = async ($: EngineInterface): Promise<Band> => current(await read($, band))
 
 const union = (a: string[], b: string[]) => [...new Set([...a, ...b])]
 const base = (path: string) => path.replace(/\/+$/, '').split('/').pop() ?? path
@@ -255,8 +283,8 @@ export const register: Register = (on, options) => {
     if (e.tool === 'Bash') {
       const ran = await next(e)
       if (ran.deny === undefined && isTestCommand(e.command)) {
-        const tests = { state: ran.isError ? ('fail' as const) : ('pass' as const), ...testCounts(ran.text ?? '') }
-        await update($, band, b => ({ ...b, tests }))
+        const run = runOf(ran.text ?? '', ran.isError === true)
+        await update($, band, b => ({ ...current(b), tests: withRun(current(b).tests, run) }))
       }
       return ran
     }
@@ -277,14 +305,28 @@ export const register: Register = (on, options) => {
     const created = isSource(file) ? newDefs.filter(n => !oldDefs.includes(n)) : []
     const removed = oldDefs.filter(n => !newDefs.includes(n))
     const reused = isSource(file) ? callsIn(addedLines(before, after), known, newDefs) : []
+    const oldTypes = typesIn(file, before)
+    const types = isSource(file) ? typesIn(file, after).filter(n => !oldTypes.includes(n)) : []
+    const added = shortcuts(addedLines(before, after))
+    const resolved = shortcuts(addedLines(after, before))
+    const code = isCode(file)
 
-    await update($, band, b => ({
-      ...b,
-      reused: union(b.reused, reused),
-      created: union(b.created, created),
-      removed: union(b.removed, removed),
-      tests: isCode(file) && b.tests.state !== 'none' ? { ...b.tests, state: 'stale' as const } : b.tests,
-    }))
+    await update($, band, x => {
+      const b = current(x)
+      return {
+        ...b,
+        reused: union(b.reused, reused),
+        created: union(b.created, created),
+        removed: union(b.removed, removed),
+        touched: code ? union(b.touched, [file]) : b.touched,
+        testEdited: b.testEdited || isTestFile(file),
+        types: union(b.types, types),
+        debtAdded: b.debtAdded + added,
+        debtResolved: b.debtResolved + resolved,
+        debtAt: added > 0 ? base(file) : b.debtAt,
+        tests: code ? { ...b.tests, edited: true, stale: b.tests.last !== undefined } : b.tests,
+      }
+    })
 
     return ran
   }).catch(($, e, next) => next(e))
@@ -324,8 +366,18 @@ export const register: Register = (on, options) => {
       }
     }
 
+    // What greybeard check last found in the touched files, and the new types no IR mentions.
+    // Read only: the band starts no compiler (.algebra/band.algebra.md).
+    const before = await load($)
+    const root = (await $.session.repo().catch(() => null))?.root ?? (await $.session.cwd())
+    const gitPath = await $.process.run(['git', 'rev-parse', '--path-format=absolute', '--git-path', 'greybeard/findings.json']).catch(() => undefined)
+    const json = gitPath?.exitCode === 0 ? await $.fs.read(gitPath.stdout.trim()).catch(() => undefined) : undefined
+    const irDir = `${root}/.algebra`
+    const irFiles = before.types.length > 0 ? (await $.fs.list(irDir).catch(() => [])).filter(f => f.kind === 'file' && f.name.endsWith('.md')) : []
+    const irs = await Promise.all(irFiles.map(f => $.fs.read(`${irDir}/${f.name}`).catch(() => '')))
+
     const b = await update($, band, x => {
-      const b = { ...EMPTY, ...x }
+      const b = current(x)
       const cost = usage.cost?.usd ?? b.cost
       // A cost below the baseline means the engine started its ledger over.
       const turn = cost >= b.cost ? cost - b.cost : cost
@@ -344,6 +396,10 @@ export const register: Register = (on, options) => {
         model: model || b.model,
         removed: stillRemoved,
         openCallers: open,
+        // No findings.json means check has not run in this repo: the column stays away, unlike "0 open".
+        findings: json === undefined ? b.findings : advanceFindings(b.findings, findingsFor(json, b.touched)),
+        // Only a project that keeps IRs is held to them.
+        drift: irFiles.length > 0 ? irDrift(b.types, irs) : [],
       }
     })
     await record($, b, options).catch(() => $.ui.status('greybeard band: could not write the task ledger'))
@@ -361,8 +417,13 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const startedAt = (await $.session.usage().catch(() => undefined))?.startedAt ?? now
     const reuse = percent(b.reused.length, b.created.length)
-    const avg = b.turns > 0 ? b.spent / b.turns : 0
-    const last = b.turnCosts[b.turnCosts.length - 1]
+    const suite = suiteOf(b.tests)
+    const findings = b.findings.open.length
+    const hasOpen = b.openCallers.length > 0
+    // Nothing to judge until the session has changed code.
+    const clean = b.tests.edited && findings === 0 && b.drift.length === 0 && !hasOpen && suite.kind === 'passing'
+    const suiteTone = suite.kind === 'new-failures' ? ('error' as const) : suite.kind === 'failing' ? ('warning' as const) : suite.kind === 'passing' ? ('success' as const) : undefined
+    const showSuite = b.tests.last !== undefined || b.tests.edited
 
     const setLevel = async (level: string) => {
       await update($, band, x => ({ ...x, level }))
@@ -374,6 +435,7 @@ export const register: Register = (on, options) => {
     }
     const review = () => run($, 'greybeard:greybeard-review')
     const audit = () => run($, 'greybeard:greybeard-audit')
+    const debt = () => run($, 'greybeard:greybeard-debt')
     const board = () => openBoard($).catch(() => $.ui.toast('greybeard band: could not open the board'))
     const copy = async () => {
       const done = await $.ui.copy({ text: markdown(snapshot(await load($), startedAt)), surface: e.surface })
@@ -385,17 +447,6 @@ export const register: Register = (on, options) => {
     const width = e.surface === 'terminal' ? e.props.bodyColumns : undefined
     const stack =(mine: NonNullable<typeof below>) => (below ? <Box flexDirection="column">{mine}{below}</Box> : mine)
 
-    const testsText =
-      b.tests.state === 'pass'
-        ? `✓ ${b.tests.passed ?? ''} tests`
-        : b.tests.state === 'fail'
-          ? `✗ ${b.tests.failed ?? ''} failed`
-          : b.tests.state === 'stale'
-            ? 'no test since change'
-            : ''
-    const testsColor = b.tests.state === 'pass' ? 'success' : b.tests.state === 'fail' ? 'error' : undefined
-    const hasOpen = b.openCallers.length > 0
-
     if (!b.details) {
       return stack(
         <Box flexDirection="row" alignItems="center" gap={2} width={width}>
@@ -403,17 +454,20 @@ export const register: Register = (on, options) => {
           <Button key="level" plain onPress={toggle}>
             <Text color={b.level === 'off' ? 'inactive' : 'suggestion'}>●</Text> {b.level}
           </Button>
-          <Text>${b.spent.toFixed(2)}</Text>
-          {last !== undefined && <Text dimColor>last ${last.toFixed(2)}</Text>}
-          <Text dimColor>{elapsed(b.busyMs)}</Text>
-          {reuse !== undefined && <Text>{reuse}% reuse</Text>}
-          {hasOpen && <Text color="warning">⚠ {b.openCallers.length} callers open</Text>}
-          {testsText !== '' && (
-            <Text color={testsColor} dimColor={b.tests.state === 'stale'}>
-              {testsText}
+          {/* State reads from color and words; no status glyphs. */}
+          {clean && <Text color="success">clean</Text>}
+          {findings > 0 && <Text color="warning">{findings} {findings === 1 ? 'finding' : 'findings'}</Text>}
+          {b.drift.length > 0 && <Text color="warning">IR drift</Text>}
+          {showSuite && suite.kind !== 'passing' && (
+            <Text color={suiteTone} dimColor={suiteTone === undefined}>
+              {suite.kind === 'stale' || suite.kind === 'not-run' ? `tests ${suiteLabel(suite)}` : suiteLabel(suite)}
             </Text>
           )}
+          {hasOpen && <Text color="warning">{b.openCallers.length} callers open</Text>}
+          {reuse !== undefined && <Text>{reuse}% reuse</Text>}
+          {b.debtAdded > 0 && <Text dimColor>+{b.debtAdded} debt</Text>}
           <Box flexGrow={1} />
+          <Text dimColor>${b.spent.toFixed(2)}</Text>
           <Button key="review" plain label="Review" onPress={review} />
           <Button key="audit" plain label="Audit" onPress={audit} />
           <Button key="board" plain label="Board" onPress={board} />
@@ -422,25 +476,25 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // Only columns that say something; callers and tests appear once there is something to report.
-    const cols: Col[] = [
-      { key: 'cost', label: 'cost', value: `$${b.spent.toFixed(2)}`, sub: last === undefined ? '' : `last $${last.toFixed(2)} · ⌀ $${avg.toFixed(2)}` },
-      { key: 'tokens', label: 'tokens', value: fmtTokens(totalTokens(b.tokens)), sub: `${b.turns} ${b.turns === 1 ? 'turn' : 'turns'}` },
-      { key: 'time', label: 'agent time', value: elapsed(b.busyMs), sub: b.turns > 0 ? `⌀ ${elapsed(b.busyMs / b.turns)} / turn` : '' },
-    ]
-    if (reuse !== undefined) cols.push({ key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: '' })
-    if (hasOpen) {
-      cols.push({ key: 'callers', label: 'callers', value: `${b.openCallers.length} open`, sub: b.openCallers.slice(0, 2).join(', '), tone: 'warning' })
+    // Only columns that say something, in order of urgency; spend is the meter at the end.
+    const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+    const cols: Col[] = []
+    if (b.findings.known && b.touched.length > 0) {
+      cols.push(findings > 0
+        ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first, tone: 'warning' }
+        : { key: 'check', label: 'check', value: 'clean', sub: b.findings.fixed > 0 ? `${b.findings.fixed} fixed` : '', tone: 'success' })
     }
-    if (b.tests.state !== 'none') {
-      cols.push({
-        key: 'tests',
-        label: 'tests',
-        value: testsLabel(b.tests),
-        sub: b.tests.state === 'pass' ? 'after last change' : b.tests.state === 'fail' ? 'last run' : 'code changed since',
-        tone: b.tests.state === 'pass' ? 'success' : b.tests.state === 'fail' ? 'error' : undefined,
-      })
+    if (b.drift.length > 0) cols.push({ key: 'model', label: 'model', value: 'IR drift', sub: `${b.drift.slice(0, 2).join(', ')} not in .algebra/`, tone: 'warning' })
+    if (showSuite) {
+      const sub = suite.kind === 'new-failures' ? suite.names.slice(0, 2).join(', ') : suite.kind === 'failing' ? 'no earlier run to compare' : suite.kind === 'stale' ? 'code changed since the last run' : suite.kind === 'passing' ? (b.created.length > 0 && !b.testEdited ? 'new logic, no test edited' : 'no new failures') : ''
+      cols.push({ key: 'regressions', label: 'regressions', value: suite.kind === 'passing' ? 'none' : suiteLabel(suite), sub, tone: suiteTone })
     }
+    if (hasOpen) cols.push({ key: 'callers', label: 'callers', value: `${b.openCallers.length} open`, sub: b.openCallers.slice(0, 2).join(', '), tone: 'warning' })
+    if (reuse !== undefined) cols.push({ key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` })
+    if (b.debtAdded > 0 || b.debtResolved > 0) {
+      cols.push({ key: 'debt', label: 'debt', value: `+${b.debtAdded} −${b.debtResolved}`, sub: b.debtAt === '' ? '' : `last added in ${b.debtAt}` })
+    }
+    cols.push({ key: 'spent', label: 'spent', value: `$${b.spent.toFixed(2)}`, sub: `${elapsed(b.busyMs)} · ${plural(b.turns, 'turn')}`, tone: 'muted' })
 
     let metrics = (
       <Box flexDirection="column">
@@ -452,7 +506,7 @@ export const register: Register = (on, options) => {
             // Off the terminal the columns share the row; a width in cells would leave most of it empty and cut the text.
             <Box key={c.key} flexDirection="column" {...(width === undefined ? { flexGrow: 1 } : { width: Math.max(10, Math.floor(width / cols.length) - 2) })}>
               <Text dimColor>{c.label}</Text>
-              <Text bold color={c.tone}>
+              <Text bold={c.tone !== 'muted'} dimColor={c.tone === 'muted'} color={c.tone === 'muted' ? undefined : c.tone}>
                 {c.value}
               </Text>
               <Text dimColor wrap="truncate-end">
@@ -466,7 +520,7 @@ export const register: Register = (on, options) => {
     // Text glyphs make broken lines in the desktop's proportional font; an SVG draws real ones.
     if (e.surface === 'desktop') {
       const { Svg } = $.ui.resolve(e)
-      metrics = <Svg source={metricsSvg(cols, b.turnCosts)} alt={cols.map(c => `${c.label} ${c.value}`).join(', ')} />
+      metrics = <Svg source={metricsSvg(cols)} alt={cols.map(c => `${c.label} ${c.value}`).join(', ')} />
     }
 
     return stack(
@@ -485,6 +539,7 @@ export const register: Register = (on, options) => {
           <Button key="copy" plain label="Copy" onPress={copy} />
           <Button key="review" plain label="Review" onPress={review} />
           <Button key="audit" plain label="Audit" onPress={audit} />
+          <Button key="debt" plain label="Debt" onPress={debt} />
           <Button key="board" plain label="Board" onPress={board} />
           <Button key="details" plain label="Compact" onPress={toggle} />
         </Box>
