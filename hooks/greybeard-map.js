@@ -86,7 +86,8 @@ function precise(root, file, buf, tsIndex) { // tsIndex: () => index, loaded on 
   const ext = path.extname(file);
   const entries = ext === '.scala' ? scala.signatures(root, file, buf)
     : /^\.[mc]?tsx?$/.test(ext) ? typescript.signatures(tsIndex(), root, file, buf) : null;
-  return entries && entries.map(sanitize).filter((e) => SAFE_ENTRY.test(e));
+  // No comment syntax either: tsc's removeComments is the first guard, this is the one nothing skips.
+  return entries && entries.map(sanitize).filter((e) => SAFE_ENTRY.test(e) && !/\/[*/]/.test(e));
 }
 
 function buildMap(root = process.cwd(), { all = false } = {}) {
