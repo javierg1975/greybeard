@@ -1,5 +1,5 @@
 name: greybeard
-version: 6.0.0
+version: 1.0.0
 description: Lazy senior dev mode for Hermes Agent, always-on context, bundled skills, and slash commands.
 author: Dietrich Gebert
 provides_hooks:
