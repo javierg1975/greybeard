@@ -443,19 +443,13 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // Fixed columns in order of urgency, a dash until there is something to say; spend is the meter at the end.
+    // Fixed columns, a dash until there is something to say: reuse first, then the session's own checks; spend is the meter at the end.
     // Callers and debt join only when they have something (.algebra/band.algebra.md).
     const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
     const dash = (key: string, sub: string): Col => ({ key, label: key, value: '–', sub, tone: 'muted' })
     const suiteSub = suite.kind === 'new-failures' ? suite.names.slice(0, 2).join(', ') : suite.kind === 'failing' ? 'no earlier run to compare' : suite.kind === 'stale' ? 'code changed since the last run' : suite.kind === 'passing' ? (b.created.length > 0 && !b.testEdited ? 'new logic, no test edited' : 'no new failures') : ''
     const cols: Col[] = [
-      !b.findings.known
-        ? dash('check', 'greybeard check not run')
-        : b.touched.length === 0
-          ? dash('check', 'no files touched yet')
-          : findings > 0
-            ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first, tone: 'warning' }
-            : { key: 'check', label: 'check', value: 'clean', sub: b.findings.fixed > 0 ? `${b.findings.fixed} fixed` : '', tone: 'success' },
+      reuse !== undefined ? { key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` } : dash('reuse', 'no new code yet'),
       ...(b.drift.length > 0
         ? [{ key: 'model', label: 'model', value: 'IR drift', sub: `${b.drift.slice(0, 2).join(', ')} not in .algebra/`, tone: 'warning' } as const]
         : b.hasIr
@@ -465,7 +459,13 @@ export const register: Register = (on, options) => {
         ? { key: 'regressions', label: 'regressions', value: suite.kind === 'passing' ? 'none' : suiteLabel(suite), sub: suiteSub, tone: suiteTone }
         : dash('regressions', 'no tests run yet'),
       ...(hasOpen ? [{ key: 'callers', label: 'callers', value: `${b.openCallers.length} open`, sub: b.openCallers.slice(0, 2).join(', '), tone: 'warning' } as const] : []),
-      reuse !== undefined ? { key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` } : dash('reuse', 'no new code yet'),
+      !b.findings.known
+        ? dash('check', 'greybeard check not run')
+        : b.touched.length === 0
+          ? dash('check', 'no files touched yet')
+          : findings > 0
+            ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first, tone: 'warning' }
+            : { key: 'check', label: 'check', value: 'clean', sub: b.findings.fixed > 0 ? `${b.findings.fixed} fixed` : '', tone: 'success' },
       ...(b.debtAdded > 0 || b.debtResolved > 0
         ? [{ key: 'debt', label: 'debt', value: `+${b.debtAdded} −${b.debtResolved}`, sub: b.debtAt === '' ? '' : `last added in ${b.debtAt}` }]
         : []),

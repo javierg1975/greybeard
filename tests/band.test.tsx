@@ -424,7 +424,9 @@ test('the details view has its line without empty rows, and off the terminal its
     expect(await ui.find({ type: 'Text', text: /─/ })).toBeDefined()
     expect((await ui.find({ type: 'Box' }))?.props.gap).toBe(0)
     // A fresh session still draws its fixed columns, each a dash until it knows something (.algebra/band.algebra.md).
-    await each(['check', 'regressions', 'reuse', 'spent'], async key => expect(await ui.find({ key })).toBeDefined())
+    const order = ['reuse', 'regressions', 'check', 'spent']
+    const keys = (await ui.findAll({ type: 'Box' })).map(box => box.props.key).filter(key => order.includes(String(key)))
+    expect(keys).toEqual(order)
     expect(await ui.find({ key: 'model' })).toBeUndefined()
     expect((await ui.findAll({ type: 'Text', text: '–' })).length).toBe(3)
     const spent = (await ui.find({ key: 'spent' }))?.props

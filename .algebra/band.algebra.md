@@ -182,7 +182,7 @@ effects:
 cross_cutting:
   - concern: fixed columns
     affects: [band, board]
-    constraint: "The band's details view always shows check, regressions, reuse and spent, and model when the repo has .algebra/; callers and debt appear only when they have something. A value not known yet is a dash, never a number, so the layout stays put and nothing unknown looks clean."
+    constraint: "The band's details view always shows reuse, regressions, check and spent in that order, and model after reuse when the repo has .algebra/; callers and debt appear only when they have something. A value not known yet is a dash, never a number, so the layout stays put and nothing unknown looks clean."
     validation_strategy: A band test renders a fresh session and finds the four columns with dashes.
   - concern: no new compiler runs
     affects: [band]
