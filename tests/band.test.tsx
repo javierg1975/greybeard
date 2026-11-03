@@ -51,9 +51,21 @@ describe('board', () => {
     expect(rows.length).toBe(3)
     expect(rows[1]?.[3]).toBe('Fix "cart", totals\nand tax')
     const tasks = tasksFrom(CSV)
-    expect(tasks[0]).toEqual({ started: '2026-10-15 12:00', project: 'shop', name: 'Fix "cart", totals\nand tax', cost: 3.1, turns: 6, agentMinutes: 26, tokens: 1_200_000, reuse: 83, tests: '14 passed', level: 'full', model: '' })
+    expect(tasks[0]).toEqual({ started: '2026-10-15 12:00', project: 'shop', name: 'Fix "cart", totals\nand tax', cost: 3.1, turns: 6, agentMinutes: 26, tokens: 1_200_000, reuse: 83, tests: '14 passed', level: 'full', model: '', findingsOpen: null, findingsFixed: null, irDrift: null })
     expect(tasks[1]?.reuse).toBeNull()
     expect(tasksFrom('not,a,ledger\n1,2,3')).toEqual([])
+  })
+
+  test('quality columns read as numbers, and as null where the row has none, so no import looks clean (.algebra/band.algebra.md)', () => {
+    const csv = `${CSV_HEADER}\n` +
+      'a-1,2026-10-15 12:00,shop,New,1.00,2,3.0,500,50,,0,0,0,1 new failure,full,claude-opus-5-5,2,7,0,0,0\n' +
+      'b-2,2026-10-14 09:00,shop,Imported,1.00,2,3.0,500,50,,,,,,import,claude-opus-5-5,,,,,\n'
+    const [fresh, imported] = tasksFrom(csv)
+    expect([fresh?.findingsOpen, fresh?.findingsFixed, fresh?.irDrift]).toEqual([2, 7, 0])
+    expect([imported?.findingsOpen, imported?.findingsFixed, imported?.irDrift]).toEqual([null, null, null])
+    const html = boardHtml(tasksFrom(csv), Date.UTC(2026, 9, 15, 12, 0))
+    expect(html).toContain('<th>Regressions</th>')
+    expect(html).toContain('data-metric="findings"')
   })
 
   const dataOf = (html: string) => JSON.parse(/<script type="application\/json" id="board-data">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? 'null')

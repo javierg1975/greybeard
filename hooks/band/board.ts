@@ -29,6 +29,10 @@ export type Task = {
   tests: string
   level: string
   model: string
+  // null: the row has no value (an older ledger, an import, or check never ran), shown as a dash.
+  findingsOpen: number | null
+  findingsFixed: number | null
+  irDrift: number | null
 }
 
 // RFC 4180 rows: quoted fields may hold commas, doubled quotes and line breaks.
@@ -67,6 +71,7 @@ export function tasksFrom(text: string): Task[] {
   if (!head?.includes('key')) return []
   const at = (row: string[], col: string) => row[head.indexOf(col)] ?? ''
   const num = (row: string[], col: string) => Number(at(row, col)) || 0
+  const opt = (row: string[], col: string) => (at(row, col) === '' ? null : num(row, col))
   return rows.map(row => ({
     started: at(row, 'started'),
     project: at(row, 'project'),
@@ -75,10 +80,13 @@ export function tasksFrom(text: string): Task[] {
     turns: num(row, 'turns'),
     agentMinutes: num(row, 'agent_minutes'),
     tokens: num(row, 'tokens_total'),
-    reuse: at(row, 'reuse_pct') === '' ? null : num(row, 'reuse_pct'),
+    reuse: opt(row, 'reuse_pct'),
     tests: at(row, 'tests'),
     level: at(row, 'level'),
     model: at(row, 'model'),
+    findingsOpen: opt(row, 'findings_open'),
+    findingsFixed: opt(row, 'findings_fixed'),
+    irDrift: opt(row, 'ir_drift'),
   }))
 }
 
@@ -189,7 +197,8 @@ const APP = `(function () {
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   var PALETTE = ${JSON.stringify(PALETTE)}
   // Each KPI its own colour pair, apart from the project colours: the line runs from one to the other.
-  var KPI = [['sessions', '#4cc3ff', '#7c8cff'], ['time', '#2fd4c0', '#5fe08a'], ['cost', '#ffd166', '#ff8a3d'], ['tokens', '#ff6fb5', '#b26bff']]
+  // The last entry says which way is good: fewer open findings, drift and new failures, more fixes.
+  var KPI = [['findings', '#ff8a3d', '#ff6fb5', 'down'], ['fixed', '#2fd4c0', '#5fe08a', 'up'], ['drift', '#4cc3ff', '#7c8cff', 'down'], ['broke', '#ffd166', '#ff8a3d', 'down']]
   function byId(id) { return document.getElementById(id) }
   function h(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e }
   function svg(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.append(e); return e }
@@ -208,7 +217,11 @@ const APP = `(function () {
     sessions: { label: 'Sessions', pick: function () { return 1 }, fmt: String },
     time: { label: 'Agent time', pick: function (t) { return t.agentMinutes * 60000 }, fmt: time },
     cost: { label: 'Cost', pick: function (t) { return t.cost }, fmt: money },
-    tokens: { label: 'Tokens', pick: function (t) { return t.tokens }, fmt: tok }
+    tokens: { label: 'Tokens', pick: function (t) { return t.tokens }, fmt: tok },
+    findings: { label: 'Open findings', pick: function (t) { return t.findingsOpen || 0 }, fmt: String },
+    fixed: { label: 'Findings fixed', pick: function (t) { return t.findingsFixed || 0 }, fmt: String },
+    drift: { label: 'IR drift', pick: function (t) { return t.irDrift || 0 }, fmt: String },
+    broke: { label: 'New failures', pick: function (t) { return /new fail/.test(t.tests) ? 1 : 0 }, fmt: String }
   }
   function total(list, pick) { return list.map(pick).reduce(add, 0) }
   function latest(name) { return tasks.filter(function (t) { return t.project === name }).reduce(function (m, t) { return t.started > m ? t.started : m }, '') }
@@ -287,7 +300,7 @@ const APP = `(function () {
     KPI.forEach(function (k, i) {
       var M = METRICS[k[0]], v = total(cur, M.pick), p = total(prev, M.pick)
       var card = h('div', 'card kpi'), value = h('div', 'kpi-value num', M.fmt(v)); card.style.setProperty('--k', k[2])
-      if (p > 0) { var pct = Math.round((v - p) / p * 100); value.append(h('span', 'delta ' + (pct >= 0 ? 'up' : 'down'), (pct >= 0 ? '↑' : '↓') + Math.abs(pct) + '%')) }
+      if (p > 0) { var pct = Math.round((v - p) / p * 100); value.append(h('span', 'delta ' + ((pct >= 0) === (k[3] === 'up') ? 'up' : 'down'), (pct >= 0 ? '↑' : '↓') + Math.abs(pct) + '%')) }
       var note = !state.period ? 'all time' : p > 0 ? 'vs previous ' + n + ' days' : 'last ' + n + ' days'
       card.append(h('div', 'kpi-label', M.label), value, h('div', 'kpi-note', note), sparkline(perDay(list, keys, M.pick), i, k))
       wrap.append(card)
@@ -363,7 +376,7 @@ const APP = `(function () {
     byId('count').textContent = String(list.length)
     if (!list.length) {
       var tr = h('tr'), td = h('td', 'empty', q ? 'No session matches.' : tasks.length ? 'No sessions in this period.' : 'No sessions yet. The band records a session after its first turn.')
-      td.colSpan = 6; tr.append(td); body.append(tr); return
+      td.colSpan = 5; tr.append(td); body.append(tr); return
     }
     var max = Math.max.apply(null, list.map(function (t) { return t.agentMinutes })) || 1
     list.forEach(function (t) {
@@ -372,7 +385,8 @@ const APP = `(function () {
       name.append(task, h('div', 'sub', (state.project ? '' : t.project + ' · ') + shortDate(t.started.slice(0, 10)) + ', ' + t.started.slice(11) + (t.model ? ' · ' + modelName(t.model) : '')), bar)
       // An imported session has no test record: a dash, not "not run".
       tests.append(t.tests || t.level !== 'import' ? pill(t.tests) : h('span', 'sub', '–'))
-      tr.append(name, h('td', 'r num', time(t.agentMinutes * 60000)), h('td', 'r num', money(t.cost)), h('td', 'r num', tok(t.tokens)), h('td', 'r num', String(t.turns)), tests)
+      var found = t.findingsOpen === null ? '–' : t.findingsOpen + ' open, ' + (t.findingsFixed || 0) + ' fixed'
+      tr.append(name, h('td', 'r num', time(t.agentMinutes * 60000)), h('td', 'r num', found), h('td', 'r num', t.irDrift === null ? '–' : String(t.irDrift)), tests)
       body.append(tr)
     })
   }
@@ -428,7 +442,10 @@ const APP = `(function () {
     ;[['Busiest day', busiest ? shortDate(busiest) + ' · ' + time(byDay[busiest] * 60000) : '–'],
       ['Longest session', best ? time(best.agentMinutes * 60000) : '–'],
       ['Average per session', cur.length ? time(total(cur, METRICS.time.pick) / cur.length) : '–'],
-      ['Average cost per session', cur.length ? money(total(cur, METRICS.cost.pick) / cur.length) : '–']].forEach(function (f) {
+      ['Average cost per session', cur.length ? money(total(cur, METRICS.cost.pick) / cur.length) : '–'],
+      ['Cost', money(total(cur, METRICS.cost.pick))],
+      ['Tokens', tok(total(cur, METRICS.tokens.pick))],
+      ['Turns', String(total(cur, function (t) { return t.turns }))]].forEach(function (f) {
       var r = h('div', 'fact'); r.append(h('span', '', f[0]), h('span', 'num', f[1])); facts.append(r)
     })
   }
@@ -543,11 +560,11 @@ export function boardHtml(tasks: Task[], now: number): string {
 <div class="actions"><div class="seg" role="group" aria-label="Period">${seg('period', [['7', '7d'], ['30', '30d'], ['90', '90d'], ['0', 'All']], '30')}</div><button type="button" class="btn" id="share">Share card</button></div></div>
 <section class="kpis" id="kpis"></section>
 <section class="card chart-card"><div class="chart-head"><div><div class="label" id="chart-sub"></div><div class="big num" id="chart-total"></div></div>
-<div class="seg" role="group" aria-label="Metric">${seg('metric', [['time', 'Agent time'], ['cost', 'Cost'], ['tokens', 'Tokens']], 'time')}</div></div>
+<div class="seg" role="group" aria-label="Metric">${seg('metric', [['time', 'Agent time'], ['findings', 'Open findings'], ['cost', 'Cost'], ['tokens', 'Tokens']], 'time')}</div></div>
 <div class="chart-wrap"><svg id="stream" role="img" aria-label="Per project and day"></svg><div class="tip" id="tip" hidden></div></div><div class="legend" id="legend"></div></section>
 <div class="grid2">
 <section class="card list"><div class="list-head"><h3>Sessions<span class="n" id="count"></span></h3><label class="search">${SEARCH_ICON}<input id="q" type="search" placeholder="Search sessions" aria-label="Search sessions"></label></div>
-<div class="table-wrap"><table><thead><tr><th>Session</th><th class="r">Agent time</th><th class="r">Cost</th><th class="r">Tokens</th><th class="r">Turns</th><th>Tests</th></tr></thead><tbody id="rows"></tbody></table></div></section>
+<div class="table-wrap"><table><thead><tr><th>Session</th><th class="r">Agent time</th><th class="r">Findings</th><th class="r">IR drift</th><th>Regressions</th></tr></thead><tbody id="rows"></tbody></table></div></section>
 <section class="card heat"><h3>Activity</h3><div class="sub">Agent time per day, last 12 weeks</div><svg id="heat" role="img" aria-label="Agent time per day, last 12 weeks"></svg>
 <div class="heroes"><div><div class="hero-label"><i style="color:#5fe08a">✦</i>Active days</div><div class="hero-value num" id="h-active"></div><div class="hero-sub" id="h-active-sub"></div></div>
 <div><div class="hero-label"><i style="color:#ffd166">◆</i>Streak</div><div class="hero-value num" id="h-streak"></div><div class="hero-sub" id="h-streak-sub"></div></div></div><div id="facts"></div></section>

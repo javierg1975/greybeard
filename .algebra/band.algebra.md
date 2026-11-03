@@ -56,6 +56,18 @@ types:
       - { name: first, type: string, constraints: ["the first open finding as check prints it, with its line"] }
       - { name: fixed, type: number, constraints: [">= 0", "keys open at an earlier turn end and gone at a later one"] }
 
+  - name: Task
+    kind: product
+    purpose: One ledger row as the board reads it; quality leads, cost and tokens follow.
+    fields:
+      - { name: findingsOpen, type: "number | null", constraints: ["null when the row has no value: an older ledger, an import, or check never ran"] }
+      - { name: findingsFixed, type: "number | null" }
+      - { name: irDrift, type: "number | null" }
+      - { name: tests, type: string, constraints: ["the Suite label the band wrote"] }
+      - { name: cost, type: number }
+      - { name: tokens, type: number }
+      - { name: agentMinutes, type: number }
+
 algebras:
   - name: Regressions
     over: [Run, Tests, Suite]
@@ -94,6 +106,22 @@ algebras:
       - name: fixed-monotone
         description: fixed never decreases within a session.
         formal: "advance(f, ks, x).fixed >= f.fixed"
+
+  - name: Board
+    over: [Task]
+    known_structure: null
+    operations:
+      - name: tasksFrom
+        signature: "string -> Task[]"
+        description: Parse a ledger CSV by header name; a column the header lacks or a field left empty reads as null for the quality fields.
+        pure: true
+        total: true
+    laws:
+      - name: unknown-is-not-zero
+        description: A quality field with no value is null and the page shows a dash, never "0", so an import or an older row never looks clean.
+        formal: "tasksFrom(oldHeaderRow).findingsOpen == null"
+      - name: lower-is-better
+        description: For open findings, IR drift and new failures a fall against the previous period is shown as good; for findings fixed a rise is.
 
 effects:
   - operation: check.record
