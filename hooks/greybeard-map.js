@@ -28,9 +28,12 @@ const SHARED = /(util|helper|lib|common|shared|service|component|hook|core|model
 // syntax only, and string literals longer than a short token are blanked.
 const SAFE_ENTRY = /^[\w$.,:;()[\]{}<>|&=?!*+\-~'"`\/@ …]+$/;
 const ENTRY_CHARS = 120;
-// Template literal types nest (`a${`b`}c`), so first to last backtick goes as one span.
-const sanitize = (e) => e.replace(/`.*`/g, '`…`')
-  .replace(/(["'])(?:(?!\1).)*\1/g, (q) => (/^.[\w.\-\/@:]{0,24}.$/.test(q) ? q : `${q[0]}…${q[0]}`));
+// One left-to-right pass, so a quote inside another kind of literal is never a delimiter.
+const LITERAL = /"[^"]*"|'[^']*'|`[^`]*`/g;
+// shortcut: entries with `${` (template interpolation, which nests) are dropped; parse them if those types matter.
+const sanitize = (e) => (e.includes('${') ? '' : e.replace(LITERAL, (q) => (/^.[\w.\-\/@:]{0,24}.$/.test(q) ? q : `${q[0]}…${q[0]}`)));
+// A quote left outside every literal means the pass above misread the entry: drop it.
+const safeEntry = (e) => SAFE_ENTRY.test(e) && !/\/[*/]/.test(e) && !/["'`]/.test(e.replace(LITERAL, ''));
 
 const PATTERNS = {
   py: [/^(?:async\s+)?def\s+([A-Za-z]\w*)/gm, /^class\s+([A-Za-z]\w*)/gm],
@@ -89,7 +92,7 @@ function precise(root, file, buf, tsIndex) { // tsIndex: () => index, loaded on 
   const entries = ext === '.scala' ? scala.signatures(root, file, buf)
     : /^\.[mc]?tsx?$/.test(ext) ? typescript.signatures(tsIndex(), root, file, buf) : null;
   // No comment syntax either: tsc's removeComments is the first guard, this is the one nothing skips.
-  return entries && entries.map(sanitize).filter((e) => SAFE_ENTRY.test(e) && !/\/[*/]/.test(e));
+  return entries && entries.map(sanitize).filter(safeEntry);
 }
 
 function buildMap(root = process.cwd(), { all = false } = {}) {
