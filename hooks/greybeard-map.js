@@ -28,7 +28,9 @@ const SHARED = /(util|helper|lib|common|shared|service|component|hook|core|model
 // syntax only, and string literals longer than a short token are blanked.
 const SAFE_ENTRY = /^[\w$.,:;()[\]{}<>|&=?!*+\-~'"`\/@ …]+$/;
 const ENTRY_CHARS = 120;
-const sanitize = (e) => e.replace(/(["'`])(?:(?!\1).)*\1/g, (q) => (/^.[\w.\-\/@:]{0,24}.$/.test(q) ? q : `${q[0]}…${q[0]}`));
+// Template literal types nest (`a${`b`}c`), so first to last backtick goes as one span.
+const sanitize = (e) => e.replace(/`.*`/g, '`…`')
+  .replace(/(["'])(?:(?!\1).)*\1/g, (q) => (/^.[\w.\-\/@:]{0,24}.$/.test(q) ? q : `${q[0]}…${q[0]}`));
 
 const PATTERNS = {
   py: [/^(?:async\s+)?def\s+([A-Za-z]\w*)/gm, /^class\s+([A-Za-z]\w*)/gm],
