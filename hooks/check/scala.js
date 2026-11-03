@@ -20,6 +20,8 @@ const OPTIONS = [...FLAGS, ...WARTS.map(w => `-P:wartremover:traverser:org.wartr
 const SESSION = [
   `set ThisBuild / libraryDependencies ~= (d => (d :+ compilerPlugin("org.wartremover" %% "wartremover" % ${quote(WARTREMOVER)} cross CrossVersion.full)).distinct)`,
   `set ThisBuild / scalacOptions ~= (o => (o ++ Seq(${OPTIONS.map(quote).join(', ')})).distinct)`,
+  // The compiler's own symbol index, read by the codebase map (hooks/map/scala.js).
+  'set ThisBuild / semanticdbEnabled := true',
 ];
 
 function sbt(root, command) {
@@ -32,7 +34,8 @@ function sbt(root, command) {
 function ensureSession(root, stateDir) {
   const active = path.join(root, 'project', 'target', 'active.json');
   const marker = path.join(stateDir, 'sbt-session');
-  const current = () => (fs.existsSync(active) ? fs.readFileSync(active, 'utf8') : '');
+  // Keyed on the settings too, so a server layered by an older greybeard gets the new ones.
+  const current = () => (fs.existsSync(active) ? `${fs.readFileSync(active, 'utf8')}\n${SESSION.join('; ')}` : '');
   if (current() && fs.existsSync(marker) && fs.readFileSync(marker, 'utf8') === current()) return;
   const out = sbt(root, SESSION.join('; '));
   if (/\[error\]/.test(out)) throw new Error(`could not layer settings into the sbt session:\n${out.slice(-2000)}`);
