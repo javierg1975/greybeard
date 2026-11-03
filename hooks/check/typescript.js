@@ -43,7 +43,8 @@ function tsc(root, tsconfig, stateDir) {
   const layered = path.join(stateDir, `tsconfig.${id}.json`);
   const declDir = path.join(stateDir, 'dts', id);
   fs.writeFileSync(layered, JSON.stringify({ extends: tsconfig,
-    compilerOptions: { ...COMPILER_OPTIONS, ...EMIT_OPTIONS, declarationDir: declDir } }, null, 2));
+    // TypeScript 6 defaults rootDir to this file's folder in .git/, which puts every source outside it and the .d.ts beside the sources.
+    compilerOptions: { ...COMPILER_OPTIONS, ...EMIT_OPTIONS, declarationDir: declDir, rootDir: root } }, null, 2));
   // shortcut: a solution-style tsconfig (files: [] + references) checks nothing here; point at a leaf tsconfig then.
   const [cmd, args] = bin ? [process.execPath, [bin]] : ['tsc', []];
   const r = spawnSync(cmd, [...args, '-p', layered, '--pretty', 'false'], { cwd: path.dirname(tsconfig), encoding: 'utf8', maxBuffer: 64 << 20 });

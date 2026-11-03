@@ -61,6 +61,22 @@ types:
     wraps: boolean
     purpose: The repo has at least one .algebra/*.md; read at each turn end, so the model column knows whether the project keeps IRs.
 
+  - name: TurnFacts
+    kind: product
+    purpose: What the turn-end hook read from the engine and the repo; the only input afterTurn has besides the band.
+    fields:
+      - { name: cost, type: "number | undefined", constraints: ["the session's cost so far, undefined when the engine reports none"] }
+      - { name: turns, type: number }
+      - { name: level, type: string }
+      - { name: transcript, type: string, constraints: ["path, '' when none was found"] }
+      - { name: title, type: "string | undefined" }
+      - { name: model, type: string, constraints: ["'' when the transcript names none"] }
+      - { name: used, type: "Usage | undefined", constraints: ["the main turn's own token usage"] }
+      - { name: durationMs, type: number }
+      - { name: grepByName, type: "Record<string, string>", constraints: ["git grep -nw output for each removed name"] }
+      - { name: findingsJson, type: "string | undefined", constraints: ["undefined: check never ran in this repo"] }
+      - { name: irs, type: "string[] | undefined", constraints: ["undefined: the repo keeps no IR; else the IR texts, empty when the session has no new types"] }
+
   - name: Task
     kind: product
     purpose: One ledger row as the board reads it; quality leads, cost and tokens follow.
@@ -111,6 +127,31 @@ algebras:
       - name: fixed-monotone
         description: fixed never decreases within a session.
         formal: "advance(f, ks, x).fixed >= f.fixed"
+
+  - name: TurnEnd
+    over: [Band, TurnFacts]
+    known_structure: null
+    operations:
+      - name: afterTurn
+        signature: "Band -> TurnFacts -> Band"
+        description: The band after a main turn. The turn-end hook only gathers TurnFacts, applies this, and writes the ledger row of the result.
+        pure: true
+        total: true
+      - name: openCalls
+        signature: "string -> string -> string[]"
+        description: For a removed name and its git grep output, the file:line calls left, or none when the name is defined again.
+        pure: true
+        total: true
+    laws:
+      - name: turn-cost-non-negative
+        description: A session cost below the band's baseline means the engine started over; the turn's own cost is then the new total, never negative.
+        formal: "last(afterTurn(b, f).turnCosts) >= 0"
+      - name: unknown-findings-kept
+        description: Without findings.json the findings stay as they were, so the check column keeps its dash.
+        formal: "afterTurn(b, { ...f, findingsJson: undefined }).findings == b.findings"
+      - name: no-ir-no-drift
+        description: A repo that keeps no IR is never held to one.
+        formal: "afterTurn(b, { ...f, irs: undefined }).drift == [] && !hasIr"
 
   - name: Board
     over: [Task]

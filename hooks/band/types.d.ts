@@ -3,8 +3,8 @@ export type Run = { failed: number; names: string[] }
 
 // The session's test facts; the band derives what it shows with suiteOf.
 export type Tests = {
-  baseline?: Run
-  last?: Run
+  baseline?: Run | undefined
+  last?: Run | undefined
   edited: boolean
   stale: boolean
 }
@@ -54,6 +54,7 @@ export type Band = {
 
 declare module 'claude-code' {
   interface PluginState {
-    greybeard: { band: Band }
+    // Definitions that existed when the session started (name -> file): what new code can reuse.
+    greybeard: { band: Band; known: Record<string, string> }
   }
 }

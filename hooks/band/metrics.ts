@@ -56,9 +56,7 @@ export const isSource = (file: string) => isCode(file) && !SKIP_DIR.test(file) &
 
 export function defsIn(file: string, text: string): string[] {
   const rules = DEFS.find(([ext]) => ext.test(file))?.[1] ?? []
-  const names = new Set<string>()
-  for (const re of rules) for (const m of text.matchAll(re)) if (m[1]) names.add(m[1])
-  return [...names]
+  return [...new Set(rules.flatMap(re => [...text.matchAll(re)].flatMap(m => (m[1] ? [m[1]] : []))))]
 }
 
 export type Hit = { file: string; line: string; text: string }
@@ -72,14 +70,12 @@ export const hits = (stdout: string): Hit[] =>
 
 // Existing definitions, name -> "file:line".
 export function parseDefs(stdout: string): Map<string, string> {
-  const known = new Map<string, string>()
-  for (const hit of hits(stdout)) {
-    if (!isSource(hit.file)) continue
-    for (const name of defsIn(hit.file, hit.text.trimStart())) {
-      if (!known.has(name)) known.set(name, `${hit.file}:${hit.line}`)
-    }
-  }
-  return known
+  const defs = hits(stdout)
+    .filter(hit => isSource(hit.file))
+    .flatMap(hit => defsIn(hit.file, hit.text.trimStart()).map(name => [name, `${hit.file}:${hit.line}`] as const))
+  // The first definition of a name wins and keeps its place.
+  const first = new Map(defs.map(([name], i) => [name, i] as const).toReversed())
+  return new Map(defs.filter(([name], i) => first.get(name) === i))
 }
 
 // Lines of `after` that `before` did not have: what an edit added.
@@ -90,12 +86,8 @@ export function addedLines(before: string, after: string): string {
 
 // Known names the added code calls, skipping its own new definitions.
 export function callsIn(text: string, known: Map<string, string>, own: string[]): string[] {
-  const names = new Set<string>()
-  for (const m of text.matchAll(/(?<![\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
-    const name = m[1] ?? ''
-    if (known.has(name) && !own.includes(name) && !GENERIC.has(name.toLowerCase())) names.add(name)
-  }
-  return [...names]
+  const calls = [...text.matchAll(/(?<![\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map(m => m[1] ?? '')
+  return [...new Set(calls.filter(name => known.has(name) && !own.includes(name) && !GENERIC.has(name.toLowerCase())))]
 }
 
 // Whether a file lies under the project root; Windows paths may use either slash.
@@ -112,7 +104,7 @@ export const isTestCommand = (command: string) => TEST_CMD.test(command)
 const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g
 
 // Pass and fail counts from common runners: pytest, jest/vitest, cargo, node --test, TAP, sbt.
-export function testCounts(raw: string): { passed?: number; failed?: number } {
+export function testCounts(raw: string): { passed: number | undefined; failed: number | undefined } {
   const output = raw.replace(ANSI, '')
   const num = (re: RegExp) => {
     const m = re.exec(output)
@@ -201,7 +193,7 @@ export function findingsFor(json: string, touched: string[]): string[] {
   }
 }
 
-export type Col = { key: string; label: string; value: string; sub: string; tone?: 'warning' | 'success' | 'error' | 'muted' }
+export type Col = { key: string; label: string; value: string; sub: string; tone?: 'warning' | 'success' | 'error' | 'muted' | undefined }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const fit = (s: string, max: number) => (s.length > max ? `${s.slice(0, Math.max(1, max - 1))}…` : s)
@@ -215,21 +207,20 @@ const STYLE = `.l,.s{fill:#87867f;font:12px ${FONT}}.v{fill:#1f1e1d;font:600 16p
 export function metricsSvg(cols: Col[], width = 720): string {
   const height = 64
   const colW = width / Math.max(1, cols.length)
-  let body = `<line class="d" x1="0" y1="0.5" x2="${width}" y2="0.5"/>`
-  cols.forEach((c, i) => {
+  const body = `<line class="d" x1="0" y1="0.5" x2="${width}" y2="0.5"/>` + cols.map((c, i) => {
     const x = i * colW + (i === 0 ? 0 : 12)
     const tone = c.tone ? ` ${c.tone}` : ''
-    if (i > 0) body += `<line class="d" x1="${i * colW}" y1="14" x2="${i * colW}" y2="${height - 2}"/>`
-    body += `<text class="l" x="${x}" y="24">${esc(c.label)}</text>`
-    body += `<text class="v${tone}" x="${x}" y="44">${esc(fit(c.value, Math.floor((colW - 16) / 9)))}</text>`
-    if (c.sub) body += `<text class="s${c.tone === 'warning' ? tone : ''}" x="${x}" y="61">${esc(fit(c.sub, Math.floor((colW - 16) / 6.2)))}</text>`
-  })
+    return (i > 0 ? `<line class="d" x1="${i * colW}" y1="14" x2="${i * colW}" y2="${height - 2}"/>` : '') +
+      `<text class="l" x="${x}" y="24">${esc(c.label)}</text>` +
+      `<text class="v${tone}" x="${x}" y="44">${esc(fit(c.value, Math.floor((colW - 16) / 9)))}</text>` +
+      (c.sub ? `<text class="s${c.tone === 'warning' ? tone : ''}" x="${x}" y="61">${esc(fit(c.sub, Math.floor((colW - 16) / 6.2)))}</text>` : '')
+  }).join('')
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${STYLE}</style>${body}</svg>`
 }
 
 export const NO_TOKENS: Tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 
-type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+export type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
 
 export const addTokens = (t: Tokens, u: Usage): Tokens => ({
   input: t.input + u.input_tokens,
@@ -239,6 +230,61 @@ export const addTokens = (t: Tokens, u: Usage): Tokens => ({
 })
 
 export const totalTokens = (t: Tokens) => t.input + t.output + t.cacheRead + t.cacheWrite
+
+// What the turn-end hook read; afterTurn turns it into the next band (.algebra/band.algebra.md).
+export type TurnFacts = {
+  cost: number | undefined
+  turns: number
+  level: string
+  transcript: string
+  title: string | undefined
+  model: string
+  used: Usage | undefined
+  durationMs: number
+  // git grep -nw output per removed name.
+  grepByName: Record<string, string>
+  // undefined: check never ran in this repo.
+  findingsJson: string | undefined
+  // undefined: the repo keeps no IR.
+  irs: string[] | undefined
+}
+
+// The file:line calls of a removed name that git grep still finds; none once the name is defined again.
+// shortcut: name match, so a same-named call in another module counts too.
+export function openCalls(name: string, grepOut: string): string[] {
+  const rows = hits(grepOut)
+  if (rows.some(r => defsIn(r.file, r.text.trimStart()).includes(name))) return []
+  const call = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$')}\\s*\\(`)
+  return rows.filter(r => call.test(r.text)).map(r => `${r.file}:${r.line}`)
+}
+
+export function afterTurn(b: Band, f: TurnFacts): Band {
+  const cost = f.cost ?? b.cost
+  // A cost below the baseline means the engine started its ledger over.
+  const turn = cost >= b.cost ? cost - b.cost : cost
+  const open = b.removed.map(name => ({ name, refs: openCalls(name, f.grepByName[name] ?? '') })).filter(g => g.refs.length > 0)
+  return {
+    ...b,
+    level: f.level,
+    transcript: f.transcript,
+    cost,
+    // Cost and turns are the session's own totals, so a reload or a second band never starts them over.
+    spent: f.cost ?? b.spent + turn,
+    turns: f.turns,
+    turnCosts: [...b.turnCosts, turn].slice(-20),
+    tokens: f.used ? addTokens(b.tokens, f.used) : b.tokens,
+    busyMs: b.busyMs + f.durationMs,
+    name: f.title ?? b.name,
+    model: f.model || b.model,
+    removed: open.map(g => g.name),
+    openCallers: open.flatMap(g => g.refs),
+    // No findings.json means check has not run in this repo: the column keeps its dash, unlike "0 open".
+    findings: f.findingsJson === undefined ? b.findings : advanceFindings(b.findings, findingsFor(f.findingsJson, b.touched)),
+    // Only a project that keeps IRs is held to them.
+    drift: f.irs === undefined ? [] : irDrift(b.types, f.irs),
+    hasIr: f.irs !== undefined,
+  }
+}
 
 export const stamp = (ms: number) => {
   const d = new Date(ms)
@@ -254,25 +300,24 @@ export const MODEL_PATTERN = '"model":"claude-[^"]*"'
 
 // The model that wrote most replies, from grep -o lines like "model":"claude-opus-5-5". Empty when none.
 export function mainModel(grepOut: string): string {
-  const count = new Map<string, number>()
-  for (const m of grepOut.matchAll(/"model":"(claude-[^"]+)"/g)) count.set(m[1], (count.get(m[1]) ?? 0) + 1)
-  return [...count].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
+  const models = [...grepOut.matchAll(/"model":"(claude-[^"]+)"/g)].flatMap(m => (m[1] ? [m[1]] : []))
+  const count = models.reduce<Record<string, number>>((acc, m) => ({ ...acc, [m]: (acc[m] ?? 0) + 1 }), {})
+  return Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
 }
 
 // The newest sidebar name in transcript lines, or undefined when the session has none.
 export function sessionTitle(jsonl: string): string | undefined {
-  for (const line of jsonl.split('\n').reverse()) {
-    if (!line.includes(TITLE_RECORD)) continue
+  const parse = (line: string) => {
     try {
-      const r = JSON.parse(line) as { type?: unknown; customTitle?: unknown }
-      if (r.type !== 'custom-title') continue
-      const title = typeof r.customTitle === 'string' ? r.customTitle.trim() : ''
-      return title === '' ? undefined : title.slice(0, 60)
+      return JSON.parse(line) as { type?: unknown; customTitle?: unknown }
     } catch {
-      continue
+      return undefined
     }
   }
-  return undefined
+  const r = jsonl.split('\n').filter(line => line.includes(TITLE_RECORD)).map(parse).findLast(r => r?.type === 'custom-title')
+  if (r === undefined) return undefined
+  const title = typeof r.customTitle === 'string' ? r.customTitle.trim() : ''
+  return title === '' ? undefined : title.slice(0, 60)
 }
 
 // One session (one task) as it is exported, copied and sent.
@@ -402,15 +447,16 @@ export type WebhookRequest = { url: string; init: { method: 'POST'; headers: Rec
 
 // The token travels only over HTTPS; plain http is allowed for a board on this machine.
 export function webhookRequest(url: string, token: string, sendNames: boolean, row: Snapshot): WebhookRequest | { refused: string } {
-  let target: URL
-  try {
-    target = new URL(url)
-  } catch {
-    return { refused: 'webhook URL is not a URL' }
-  }
+  const target = (() => {
+    try {
+      return new URL(url)
+    } catch {
+      return undefined
+    }
+  })()
+  if (target === undefined) return { refused: 'webhook URL is not a URL' }
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname)
   if (target.protocol !== 'https:' && !(target.protocol === 'http:' && local)) return { refused: 'webhook needs https' }
-  const headers: Record<string, string> = { 'content-type': 'application/json' }
-  if (token !== '') headers.authorization = `Bearer ${token}`
+  const headers: Record<string, string> = { 'content-type': 'application/json', ...(token !== '' ? { authorization: `Bearer ${token}` } : {}) }
   return { url: target.href, init: { method: 'POST', headers, body: JSON.stringify(sendNames ? row : { ...row, name: '' }) } }
 }

@@ -36,34 +36,22 @@ export type Task = {
 }
 
 // RFC 4180 rows: quoted fields may hold commas, doubled quotes and line breaks.
+// One token per quoted part, plain run, comma or line break; a quote mid-field opens a quoted part, as before.
+const CSV_TOKEN = /"((?:[^"]|"")*)"?|([^",\r\n]+)|(,)|(\r\n|\n|\r)/g
+type CsvToken = { kind: 'text' | 'comma' | 'break'; value: string }
+
+// The runs between separators, in one pass: a separator at the end leaves an empty last run.
+const splitOn = <T>(xs: T[], isSep: (x: T) => boolean): T[][] => {
+  const cuts = xs.flatMap((x, i) => (isSep(x) ? [i] : []))
+  return [-1, ...cuts].map((cut, j) => xs.slice(cut + 1, cuts[j] ?? xs.length))
+}
+
 export function parseCsv(text: string): string[][] {
-  const rows: string[][] = []
-  let row: string[] = []
-  let field = ''
-  let quoted = false
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i]
-    if (quoted) {
-      if (c === '"' && text[i + 1] === '"') {
-        field += '"'
-        i++
-      } else if (c === '"') quoted = false
-      else field += c
-    } else if (c === '"') quoted = true
-    else if (c === ',') {
-      row.push(field)
-      field = ''
-    } else if (c === '\n' || c === '\r') {
-      if (c === '\r' && text[i + 1] === '\n') i++
-      row.push(field)
-      if (row.some(f => f !== '')) rows.push(row)
-      row = []
-      field = ''
-    } else field += c
-  }
-  row.push(field)
-  if (row.some(f => f !== '')) rows.push(row)
-  return rows
+  const tokens = [...text.matchAll(CSV_TOKEN)].map((m): CsvToken =>
+    m[3] ? { kind: 'comma', value: '' } : m[4] ? { kind: 'break', value: '' } : { kind: 'text', value: m[1] !== undefined ? m[1].replace(/""/g, '"') : (m[2] ?? '') })
+  return splitOn(tokens, t => t.kind === 'break')
+    .map(row => splitOn(row, t => t.kind === 'comma').map(field => field.map(t => t.value).join('')))
+    .filter(row => row.some(f => f !== ''))
 }
 
 export function tasksFrom(text: string): Task[] {

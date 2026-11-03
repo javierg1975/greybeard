@@ -3,22 +3,16 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { boardHtml, tasksFrom } from './board'
 import type { Band } from './types'
-import type { Col } from './metrics'
+import type { Col, TurnFacts } from './metrics'
 import {
-  GREP_DEFS,
-  NO_FINDINGS,
-  NO_TESTS,
-  NO_TOKENS,
-  addTokens,
   addedLines,
-  advanceFindings,
+  addTokens,
+  afterTurn,
   callsIn,
   defsIn,
   elapsed,
-  findingsFor,
-  hits,
+  GREP_DEFS,
   inProject,
-  irDrift,
   isCode,
   isSource,
   isTestCommand,
@@ -27,13 +21,16 @@ import {
   markdown,
   metricsSvg,
   MODEL_PATTERN,
+  NO_FINDINGS,
+  NO_TESTS,
+  NO_TOKENS,
   parseDefs,
   percent,
   resume,
   runOf,
+  sessionTitle,
   shortcuts,
   snapshot,
-  sessionTitle,
   suiteLabel,
   suiteOf,
   taskKey,
@@ -98,6 +95,8 @@ const TASK = {
   debtAt: '',
 }
 const band = atom({ plugin: 'greybeard', key: 'band' } as const, EMPTY)
+const known = atom({ plugin: 'greybeard', key: 'known' } as const, {} as Record<string, string>)
+const remember = ($: EngineInterface, defs: Map<string, string>) => update($, known, () => Object.fromEntries(defs))
 // State kept from an older version of the band lacks newer fields, and its tests had another shape.
 const current = (b: Band): Band => {
   const x = { ...EMPTY, ...b }
@@ -106,7 +105,7 @@ const current = (b: Band): Band => {
 const load = async ($: EngineInterface): Promise<Band> => current(await read($, band))
 
 const union = (a: string[], b: string[]) => [...new Set([...a, ...b])]
-const base = (path: string) => path.replace(/\/+$/, '').split('/').pop() ?? path
+const base = (path: string) => path.replace(/\/+$/, '').split('/').at(-1) ?? path
 
 // Windows sets USERPROFILE, not HOME.
 const home = async ($: EngineInterface) => (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
@@ -164,12 +163,12 @@ async function findTranscript($: EngineInterface, session: string): Promise<stri
   const named = `${projects}/${root.replace(/[^a-zA-Z0-9]/g, '-')}/${session}.jsonl`
   if (root !== '' && (await exists(named))) return named
   const dirs = (await $.fs.list(projects).catch(() => [])).filter(d => d.kind === 'dir')
-  // One at a time: thousands of checks in flight at once are slower than in turn.
-  for (const dir of dirs) {
+  // One at a time: thousands of checks in flight at once are slower than in turn. Once found, the rest is skipped.
+  return dirs.reduce<Promise<string>>(async (found, dir) => {
+    const prior = await found
     const file = `${projects}/${dir.name}/${session}.jsonl`
-    if (await exists(file)) return file
-  }
-  return ''
+    return prior !== '' ? prior : (await exists(file)) ? file : ''
+  }, Promise.resolve(''))
 }
 
 // Where the task ledgers and the board live.
@@ -243,11 +242,8 @@ async function start($: EngineInterface): Promise<Map<string, string>> {
 }
 
 export const register: Register = (on, options) => {
-  // Definitions that existed when the session started: what new code can reuse.
-  let known = new Map<string, string>()
-
   on('session.start', async ($, e, next) => {
-    known = await start($)
+    await remember($, await start($))
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -260,7 +256,7 @@ export const register: Register = (on, options) => {
   on('command.run', { command: ['clear', 'resume', 'branch'] }, async ($, e, next) => {
     const session = await $.session.id()
     const result = await next(e)
-    if ((await $.session.id()) !== session) known = await start($).catch(() => known)
+    if ((await $.session.id()) !== session) await start($).then(defs => remember($, defs)).catch(() => undefined)
     return result
   }).catch(($, e, next) => next(e))
 
@@ -305,7 +301,7 @@ export const register: Register = (on, options) => {
     const newDefs = defsIn(file, after)
     const created = isSource(file) ? newDefs.filter(n => !oldDefs.includes(n)) : []
     const removed = oldDefs.filter(n => !newDefs.includes(n))
-    const reused = isSource(file) ? callsIn(addedLines(before, after), known, newDefs) : []
+    const reused = isSource(file) ? callsIn(addedLines(before, after), new Map(Object.entries(await read($, known))), newDefs) : []
     const oldTypes = typesIn(file, before)
     const types = isSource(file) ? typesIn(file, after).filter(n => !oldTypes.includes(n)) : []
     const added = shortcuts(addedLines(before, after))
@@ -340,70 +336,38 @@ export const register: Register = (on, options) => {
       return next(e)
     }
 
+    // Gather what afterTurn needs; every decision about the next band is made there (.algebra/band.algebra.md).
     const usage = await $.session.usage()
-    const turns = await $.session.turns()
-    const level = await readLevel($)
-    const { removed, transcript: saved } = await load($)
+    const before = await load($)
     const session = await $.session.id()
     // Here, not at start: the first turn writes the file, and a new id (/clear, /resume) or a move (/cd, a worktree) changes it.
-    const kept = base(saved) === `${session}.jsonl` && (await $.fs.exists(saved).catch(() => false))
-    const transcript = kept ? saved : await findTranscript($, session)
-    const title = await readTitle($, transcript)
-    const model = await readModel($, transcript)
-
-    // A removed or renamed definition that is not defined again but still called somewhere.
-    // shortcut: name match with git grep, so a same-named call in another module counts too.
-    const stillRemoved: string[] = []
-    const open: string[] = []
-    for (const name of removed) {
+    const kept = base(before.transcript) === `${session}.jsonl` && (await $.fs.exists(before.transcript).catch(() => false))
+    const transcript = kept ? before.transcript : await findTranscript($, session)
+    // One grep at a time, as before.
+    const grepByName = await before.removed.reduce<Promise<Record<string, string>>>(async (found, name) => {
       const grep = await $.process.run(['git', 'grep', '--untracked', '-nw', '-e', name]).catch(() => undefined)
-      const rows = hits(grep?.stdout ?? '')
-      if (rows.some(r => defsIn(r.file, r.text.trimStart()).includes(name))) continue
-      const call = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$')}\\s*\\(`)
-      const refs = rows.filter(r => call.test(r.text)).map(r => `${r.file}:${r.line}`)
-      if (refs.length > 0) {
-        stillRemoved.push(name)
-        open.push(...refs)
-      }
-    }
-
-    // What greybeard check last found in the touched files, and the new types no IR mentions.
-    // Read only: the band starts no compiler (.algebra/band.algebra.md).
-    const before = await load($)
+      return { ...(await found), [name]: grep?.stdout ?? '' }
+    }, Promise.resolve({}))
+    // Read only: the band starts no compiler.
     const root = (await $.session.repo().catch(() => null))?.root ?? (await $.session.cwd())
     const gitPath = await $.process.run(['git', 'rev-parse', '--path-format=absolute', '--git-path', 'greybeard/findings.json']).catch(() => undefined)
-    const json = gitPath?.exitCode === 0 ? await $.fs.read(gitPath.stdout.trim()).catch(() => undefined) : undefined
     const irDir = `${root}/.algebra`
     const irFiles = (await $.fs.list(irDir).catch(() => [])).filter(f => f.kind === 'file' && f.name.endsWith('.md'))
-    const irs = before.types.length > 0 ? await Promise.all(irFiles.map(f => $.fs.read(`${irDir}/${f.name}`).catch(() => ''))) : []
+    const facts: TurnFacts = {
+      cost: usage.cost?.usd,
+      turns: await $.session.turns(),
+      level: await readLevel($),
+      transcript,
+      title: await readTitle($, transcript),
+      model: await readModel($, transcript),
+      used,
+      durationMs: e.durationMs,
+      grepByName,
+      findingsJson: gitPath?.exitCode === 0 ? await $.fs.read(gitPath.stdout.trim()).catch(() => undefined) : undefined,
+      irs: irFiles.length === 0 ? undefined : before.types.length > 0 ? await Promise.all(irFiles.map(f => $.fs.read(`${irDir}/${f.name}`).catch(() => ''))) : [],
+    }
 
-    const b = await update($, band, x => {
-      const b = current(x)
-      const cost = usage.cost?.usd ?? b.cost
-      // A cost below the baseline means the engine started its ledger over.
-      const turn = cost >= b.cost ? cost - b.cost : cost
-      return {
-        ...b,
-        level,
-        transcript,
-        cost,
-        // Cost and turns are the session's own totals, so a reload or a second band never starts them over.
-        spent: usage.cost?.usd ?? b.spent + turn,
-        turns,
-        turnCosts: [...b.turnCosts, turn].slice(-20),
-        tokens: used ? addTokens(b.tokens, used) : b.tokens,
-        busyMs: b.busyMs + e.durationMs,
-        name: title ?? b.name,
-        model: model || b.model,
-        removed: stillRemoved,
-        openCallers: open,
-        // No findings.json means check has not run in this repo: the column stays away, unlike "0 open".
-        findings: json === undefined ? b.findings : advanceFindings(b.findings, findingsFor(json, b.touched)),
-        // Only a project that keeps IRs is held to them.
-        drift: irFiles.length > 0 ? irDrift(b.types, irs) : [],
-        hasIr: irFiles.length > 0,
-      }
-    })
+    const b = await update($, band, x => afterTurn(current(x), facts))
     await record($, b, options).catch(() => $.ui.status('greybeard band: could not write the task ledger'))
 
     return next(e)
@@ -447,11 +411,12 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     // bodyColumns counts terminal cells; a graphical surface draws Buttons wider than their cells, so a row sized to it wraps there.
     const width = e.surface === 'terminal' ? e.props.bodyColumns : undefined
+    const sized = width === undefined ? {} : { width }
     const stack =(mine: NonNullable<typeof below>) => (below ? <Box flexDirection="column">{mine}{below}</Box> : mine)
 
     if (!b.details) {
       return stack(
-        <Box flexDirection="row" alignItems="center" gap={2} width={width}>
+        <Box flexDirection="row" alignItems="center" gap={2} {...sized}>
           {/* A click opens the four levels: one click, one turn, no stops on levels nobody wanted. */}
           <Button key="level" plain onPress={toggle}>
             <Text color={b.level === 'off' ? 'inactive' : 'suggestion'}>●</Text> {b.level}
@@ -461,7 +426,7 @@ export const register: Register = (on, options) => {
           {findings > 0 && <Text color="warning">{findings} {findings === 1 ? 'finding' : 'findings'}</Text>}
           {b.drift.length > 0 && <Text color="warning">IR drift</Text>}
           {showSuite && suite.kind !== 'passing' && (
-            <Text color={suiteTone} dimColor={suiteTone === undefined}>
+            <Text {...(suiteTone === undefined ? {} : { color: suiteTone })} dimColor={suiteTone === undefined}>
               {suite.kind === 'stale' || suite.kind === 'not-run' ? `tests ${suiteLabel(suite)}` : suiteLabel(suite)}
             </Text>
           )}
@@ -482,28 +447,36 @@ export const register: Register = (on, options) => {
     // Callers and debt join only when they have something (.algebra/band.algebra.md).
     const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
     const dash = (key: string, sub: string): Col => ({ key, label: key, value: '–', sub, tone: 'muted' })
-    const cols: Col[] = []
-    cols.push(!b.findings.known
-      ? dash('check', 'greybeard check not run')
-      : b.touched.length === 0
-        ? dash('check', 'no files touched yet')
-        : findings > 0
-          ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first, tone: 'warning' }
-          : { key: 'check', label: 'check', value: 'clean', sub: b.findings.fixed > 0 ? `${b.findings.fixed} fixed` : '', tone: 'success' })
-    if (b.drift.length > 0) cols.push({ key: 'model', label: 'model', value: 'IR drift', sub: `${b.drift.slice(0, 2).join(', ')} not in .algebra/`, tone: 'warning' })
-    else if (b.hasIr) cols.push(b.types.length > 0 ? { key: 'model', label: 'model', value: 'in sync', sub: 'new types are in .algebra/', tone: 'success' } : dash('model', 'no new types'))
-    if (showSuite) {
-      const sub = suite.kind === 'new-failures' ? suite.names.slice(0, 2).join(', ') : suite.kind === 'failing' ? 'no earlier run to compare' : suite.kind === 'stale' ? 'code changed since the last run' : suite.kind === 'passing' ? (b.created.length > 0 && !b.testEdited ? 'new logic, no test edited' : 'no new failures') : ''
-      cols.push({ key: 'regressions', label: 'regressions', value: suite.kind === 'passing' ? 'none' : suiteLabel(suite), sub, tone: suiteTone })
-    } else cols.push(dash('regressions', 'no tests run yet'))
-    if (hasOpen) cols.push({ key: 'callers', label: 'callers', value: `${b.openCallers.length} open`, sub: b.openCallers.slice(0, 2).join(', '), tone: 'warning' })
-    cols.push(reuse !== undefined ? { key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` } : dash('reuse', 'no new code yet'))
-    if (b.debtAdded > 0 || b.debtResolved > 0) {
-      cols.push({ key: 'debt', label: 'debt', value: `+${b.debtAdded} −${b.debtResolved}`, sub: b.debtAt === '' ? '' : `last added in ${b.debtAt}` })
-    }
-    cols.push({ key: 'spent', label: 'spent', value: `$${b.spent.toFixed(2)}`, sub: `${elapsed(b.busyMs)} · ${plural(b.turns, 'turn')}`, tone: 'muted' })
+    const suiteSub = suite.kind === 'new-failures' ? suite.names.slice(0, 2).join(', ') : suite.kind === 'failing' ? 'no earlier run to compare' : suite.kind === 'stale' ? 'code changed since the last run' : suite.kind === 'passing' ? (b.created.length > 0 && !b.testEdited ? 'new logic, no test edited' : 'no new failures') : ''
+    const cols: Col[] = [
+      !b.findings.known
+        ? dash('check', 'greybeard check not run')
+        : b.touched.length === 0
+          ? dash('check', 'no files touched yet')
+          : findings > 0
+            ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first, tone: 'warning' }
+            : { key: 'check', label: 'check', value: 'clean', sub: b.findings.fixed > 0 ? `${b.findings.fixed} fixed` : '', tone: 'success' },
+      ...(b.drift.length > 0
+        ? [{ key: 'model', label: 'model', value: 'IR drift', sub: `${b.drift.slice(0, 2).join(', ')} not in .algebra/`, tone: 'warning' } as const]
+        : b.hasIr
+          ? [b.types.length > 0 ? ({ key: 'model', label: 'model', value: 'in sync', sub: 'new types are in .algebra/', tone: 'success' } as const) : dash('model', 'no new types')]
+          : []),
+      showSuite
+        ? { key: 'regressions', label: 'regressions', value: suite.kind === 'passing' ? 'none' : suiteLabel(suite), sub: suiteSub, tone: suiteTone }
+        : dash('regressions', 'no tests run yet'),
+      ...(hasOpen ? [{ key: 'callers', label: 'callers', value: `${b.openCallers.length} open`, sub: b.openCallers.slice(0, 2).join(', '), tone: 'warning' } as const] : []),
+      reuse !== undefined ? { key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` } : dash('reuse', 'no new code yet'),
+      ...(b.debtAdded > 0 || b.debtResolved > 0
+        ? [{ key: 'debt', label: 'debt', value: `+${b.debtAdded} −${b.debtResolved}`, sub: b.debtAt === '' ? '' : `last added in ${b.debtAt}` }]
+        : []),
+      { key: 'spent', label: 'spent', value: `$${b.spent.toFixed(2)}`, sub: `${elapsed(b.busyMs)} · ${plural(b.turns, 'turn')}`, tone: 'muted' },
+    ]
 
-    let metrics = (
+    // Text glyphs make broken lines in the desktop's proportional font; an SVG draws real ones.
+    const Svg = e.surface === 'desktop' ? $.ui.resolve(e).Svg : undefined
+    const metrics = Svg ? (
+      <Svg source={metricsSvg(cols)} alt={cols.map(c => `${c.label} ${c.value}`).join(', ')} />
+    ) : (
       <Box flexDirection="column">
         <Text dimColor wrap="truncate-end">
           {'─'.repeat(e.props.bodyColumns)}
@@ -513,7 +486,7 @@ export const register: Register = (on, options) => {
             // Off the terminal the columns share the row; a width in cells would leave most of it empty and cut the text.
             <Box key={c.key} flexDirection="column" {...(width === undefined ? { flexGrow: 1 } : { width: Math.max(10, Math.floor(width / cols.length) - 2) })}>
               <Text dimColor>{c.label}</Text>
-              <Text bold={c.tone !== 'muted'} dimColor={c.tone === 'muted'} color={c.tone === 'muted' ? undefined : c.tone}>
+              <Text bold={c.tone !== 'muted'} dimColor={c.tone === 'muted'} {...(c.tone === undefined || c.tone === 'muted' ? {} : { color: c.tone })}>
                 {c.value}
               </Text>
               <Text dimColor wrap="truncate-end">
@@ -524,15 +497,10 @@ export const register: Register = (on, options) => {
         </Box>
       </Box>
     )
-    // Text glyphs make broken lines in the desktop's proportional font; an SVG draws real ones.
-    if (e.surface === 'desktop') {
-      const { Svg } = $.ui.resolve(e)
-      metrics = <Svg source={metricsSvg(cols)} alt={cols.map(c => `${c.label} ${c.value}`).join(', ')} />
-    }
 
     return stack(
       // The desktop's SVG draws its own line at the top, which would touch the buttons without the gap.
-      <Box flexDirection="column" width={width} gap={e.surface === 'desktop' ? 1 : 0}>
+      <Box flexDirection="column" {...sized} gap={e.surface === 'desktop' ? 1 : 0}>
         <Box flexDirection="row" alignItems="center" gap={1}>
           {LEVELS.map(level => (
             <Button

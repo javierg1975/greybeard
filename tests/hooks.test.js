@@ -318,7 +318,10 @@ const copyPath = path.join(customConfigDir, process.platform === 'win32' ? 'grey
 assert.ok(fs.existsSync(copyPath), 'nudge must copy the statusline script into the config dir (#1032)');
 // The snippet is JSON-encoded, which doubles Windows backslashes.
 assert.ok(result.stdout.includes(JSON.stringify(copyPath).slice(1, -1)), 'nudge must point at the config-dir copy, not the plugin cache (#1032)');
-assert.ok(!result.stdout.includes(path.join(root, 'hooks')), 'nudge must not point into the versioned plugin dir (#1032)');
+// Only the nudge itself: the codebase map, earlier in the output, names its own script by design.
+const nudge = result.stdout.slice(result.stdout.indexOf('STATUSLINE SETUP NEEDED'), result.stdout.indexOf('Proactively offer'));
+assert.ok(nudge.includes('STATUSLINE SETUP NEEDED'), 'nudge text must be found (#1032)');
+assert.ok(!nudge.includes(path.join(root, 'hooks')), 'nudge must not point into the versioned plugin dir (#1032)');
 // Later sessions refresh the copy, so script fixes ship with plugin updates.
 fs.writeFileSync(copyPath, 'old');
 run('greybeard-activate.js', { HOME: home2, USERPROFILE: home2, CLAUDE_CONFIG_DIR: customConfigDir, GREYBEARD_DEFAULT_MODE: 'lite' });

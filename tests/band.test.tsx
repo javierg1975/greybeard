@@ -2,9 +2,12 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { boardHtml, parseCsv, tasksFrom } from '../hooks/band/board'
 import type { Band } from '../hooks/band/types'
+import type { TurnFacts } from '../hooks/band/metrics'
 import {
   NO_TOKENS,
   addTokens,
+  afterTurn,
+  openCalls,
   addedLines,
   callsIn,
   defsIn,
@@ -54,6 +57,8 @@ describe('board', () => {
     expect(tasks[0]).toEqual({ started: '2026-10-15 12:00', project: 'shop', name: 'Fix "cart", totals\nand tax', cost: 3.1, turns: 6, agentMinutes: 26, tokens: 1_200_000, reuse: 83, tests: '14 passed', level: 'full', model: '', findingsOpen: null, findingsFixed: null, irDrift: null })
     expect(tasks[1]?.reuse).toBeNull()
     expect(tasksFrom('not,a,ledger\n1,2,3')).toEqual([])
+    // CRLF ends a row but stays inside quotes; a quote mid-field opens a quoted part; an unclosed one runs to the end.
+    expect(parseCsv('a,b\r\n"x\r\ny",\r\n\r\nq"u,o"te,"open,\nrest')).toEqual([['a', 'b'], ['x\r\ny', ''], ['qu,ote', 'open,\nrest']])
   })
 
   test('quality columns read as numbers, and as null where the row has none, so no import looks clean (.algebra/band.algebra.md)', () => {
@@ -109,8 +114,53 @@ describe('metrics', () => {
     level: 'full', model: 'claude-opus-5-5', cost: 31.9, spent: 3.1, turns: 6, turnCosts: [0.42], tokens: { input: 5000, output: 85_000, cacheRead: 1_100_000, cacheWrite: 10_000 },
     busyMs: 1_560_000, name: 'Fix the cart | totals, again', project: 'shop', session: '4c69e3db-57a0', transcript: '', reused: ['to_cents'], created: [],
     removed: [], openCallers: [], tests: withRun(NO_TESTS, { failed: 0, names: [] }), touched: [], testEdited: false,
-    findings: NO_FINDINGS, types: [], drift: [], debtAdded: 0, debtResolved: 0, debtAt: '', details: false,
+    findings: NO_FINDINGS, types: [], drift: [], hasIr: false, debtAdded: 0, debtResolved: 0, debtAt: '', details: false,
   }
+
+  const FACTS: TurnFacts = {
+    cost: 32.4, turns: 7, level: 'full', transcript: '/t/s1.jsonl', title: undefined, model: '', used: undefined,
+    durationMs: 1000, grepByName: {}, findingsJson: undefined, irs: undefined,
+  }
+
+  test('after a turn the band books its cost, time and totals, and keeps what the transcript does not name', () => {
+    const b = afterTurn(BASE, FACTS)
+    expect([b.cost, b.spent, b.turns, b.busyMs, b.level, b.transcript]).toEqual([32.4, 32.4, 7, 1_561_000, 'full', '/t/s1.jsonl'])
+    expect((b.turnCosts.at(-1) ?? 0).toFixed(2)).toBe('0.50')
+    // No title or model in the transcript: the band keeps its own.
+    expect([b.name, b.model]).toEqual([BASE.name, BASE.model])
+    expect(afterTurn(BASE, { ...FACTS, title: 'Refunds', model: 'claude-haiku-5-5' })).toMatchObject({ name: 'Refunds', model: 'claude-haiku-5-5' })
+    // No cost from the engine: the band keeps counting from its own.
+    expect(afterTurn(BASE, { ...FACTS, cost: undefined }).cost).toBe(BASE.cost)
+  })
+
+  test('the laws of afterTurn hold (.algebra/band.algebra.md)', () => {
+    // turn-cost-non-negative: a session cost below the baseline is a ledger started over.
+    expect(afterTurn(BASE, { ...FACTS, cost: 1.2 }).turnCosts.at(-1)).toBe(1.2)
+    // unknown-findings-kept: no findings.json, no change.
+    const seen = { ...BASE, findings: advanceFindings(NO_FINDINGS, ['src/A.ts:3 functional/no-let let']) }
+    expect(afterTurn(seen, FACTS).findings).toEqual(seen.findings)
+    // no-ir-no-drift: a repo without IRs has no drift and no model column.
+    const typed = { ...BASE, types: ['Lane'] }
+    expect(afterTurn(typed, FACTS)).toMatchObject({ drift: [], hasIr: false })
+    expect(afterTurn(typed, { ...FACTS, irs: ['types: []'] })).toMatchObject({ drift: ['Lane'], hasIr: true })
+    expect(afterTurn(typed, { ...FACTS, irs: ['- name: Lane'] })).toMatchObject({ drift: [], hasIr: true })
+  })
+
+  test('only findings in touched files count, and a finding gone at turn end counts as fixed', () => {
+    const touched = { ...BASE, touched: ['/repo/src/A.scala'] }
+    const json = (a: string[]) => JSON.stringify({ '/repo/src/A.scala': a, '/repo/src/Other.scala': ['src/Other.scala:1 E198 unused'] })
+    const once = afterTurn(touched, { ...FACTS, findingsJson: json(['src/A.scala:41 wartremover:Var var is disabled']) })
+    expect(once.findings).toMatchObject({ known: true, open: ['src/A.scala wartremover:Var var is disabled'], fixed: 0 })
+    expect(afterTurn(once, { ...FACTS, findingsJson: json([]) }).findings).toMatchObject({ open: [], fixed: 1 })
+  })
+
+  test('a removed name stays open while something still calls it, and closes once it is defined again', () => {
+    const grep = 'src/a.ts:3:  const t = toCents(p)\nsrc/b.ts:9:// toCents was here\n'
+    expect(openCalls('toCents', grep)).toEqual(['src/a.ts:3'])
+    expect(openCalls('toCents', `${grep}src/c.ts:1:export function toCents(v: number) {\n`)).toEqual([])
+    const b = afterTurn({ ...BASE, removed: ['toCents', 'gone'] }, { ...FACTS, grepByName: { toCents: grep } })
+    expect([b.removed, b.openCallers]).toEqual([['toCents'], ['src/a.ts:3']])
+  })
 
   test('a band that starts again mid-session goes on from its row instead of from zero', () => {
     const csv = `${CSV_HEADER}\nother-1,2026-10-14 09:00,shop,Other,1.00,2,3.0,500,50,,0,0,0,not run,full\n4c69e3db-7,2026-10-15 01:10,shop,"Fix the cart, again",46.09,32,55.5,107900000,250000,,0,0,0,stale,full\n`
@@ -241,8 +291,8 @@ describe('metrics', () => {
     expect(isTestCommand('npm test')).toBe(true)
     expect(isTestCommand('cd api && python -m pytest -q')).toBe(true)
     expect(isTestCommand('npm install')).toBe(false)
-    for (const cmd of ['sbt test', 'sbt --client test', 'sbt "testOnly klados.ViewSpec"', 'sbt clean test', 'scala-cli test .', 'mill core.test'])
-      expect(isTestCommand(cmd)).toBe(true)
+    ;['sbt test', 'sbt --client test', 'sbt "testOnly klados.ViewSpec"', 'sbt clean test', 'scala-cli test .', 'mill core.test'].forEach(cmd =>
+      expect(isTestCommand(cmd)).toBe(true))
     expect(isTestCommand('sbt compile')).toBe(false)
     expect(testCounts('[error] Failed: Total 14, Failed 2, Errors 1, Passed 11')).toEqual({ passed: 11, failed: 3 })
     expect(testCounts('===== 14 passed, 1 failed in 0.31s =====')).toEqual({ passed: 14, failed: 1 })
@@ -263,7 +313,7 @@ describe('metrics', () => {
     const old = { failed: 1, names: ['csv: pandas one-liner'] }
     // merge-semilattice: idempotent and commutative on names.
     expect(mergeRun(old, old)).toEqual(old)
-    expect(mergeRun(old, { failed: 1, names: ['b'] }).names.sort()).toEqual(mergeRun({ failed: 1, names: ['b'] }, old).names.sort())
+    expect(mergeRun(old, { failed: 1, names: ['b'] }).names.toSorted()).toEqual(mergeRun({ failed: 1, names: ['b'] }, old).names.toSorted())
     // baseline-never-new: the baseline run itself, or the same failures after an edit, read as passing.
     expect(suiteOf(withRun(NO_TESTS, old))).toEqual({ kind: 'passing' })
     const edited = { ...withRun(NO_TESTS, old), edited: true, stale: true }
@@ -315,10 +365,27 @@ const BAND = {
   props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} },
 } as const
 
+// One at a time: the view is stored, so each mount starts where the last one left off.
+const each = <T,>(xs: readonly T[], f: (x: T) => Promise<unknown>) => xs.reduce<Promise<unknown>>((p, x) => p.then(() => f(x)), Promise.resolve())
+// The one place a test keeps a running record, so the functional rules hold everywhere else.
+// A log notes each call a spy sees; a cell is a value of the fake world that a scenario moves on.
+const log = <T,>() => {
+  const seen: T[] = []
+  // eslint-disable-next-line functional/immutable-data -- the sanctioned recorder site
+  return { seen: (): readonly T[] => [...seen], note: (x: T) => void seen.push(x) }
+}
+const cell = <T,>(initial: T) => {
+  // eslint-disable-next-line functional/no-let -- the sanctioned recorder site
+  let value = initial
+  return { get: () => value, set: (next: T) => void (value = next) }
+}
+// A slash command as the person types it at the prompt.
+const typed = (command: string) => ({ command, args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } })
+
 test('the band switches between compact and details on terminal and desktop', async ($, on) => {
   mock.clock(on)
   mock.store(on)
-  for (const surface of ['terminal', 'desktop'] as const) {
+  await each(['terminal', 'desktop'] as const, async surface => {
     const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     expect(await ui.find({ key: 'level' })).toBeDefined()
     expect(await ui.find({ key: 'board' })).toBeDefined()
@@ -333,31 +400,31 @@ test('the band switches between compact and details on terminal and desktop', as
     await ui.press({ key: 'details' })
     expect(await ui.find({ key: 'level' })).toBeDefined()
     await ui.unmount()
-  }
+  })
 })
 
 test('the row takes bodyColumns only in the terminal, where a Button is as wide as its cells', async ($, on) => {
   mock.clock(on)
   mock.store(on)
-  for (const [surface, width] of [['terminal', 100], ['vscode', undefined]] as const) {
+  await each([['terminal', 100], ['vscode', undefined]] as const, async ([surface, width]) => {
     const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     expect((await ui.find({ type: 'Box' }))?.props.width).toBe(width)
     await ui.press({ key: 'details' })
     expect((await ui.find({ type: 'Box' }))?.props.width).toBe(width)
     await ui.unmount()
-  }
+  })
 })
 
 test('the details view has its line without empty rows, and off the terminal its columns share the row', async ($, on) => {
   mock.clock(on)
   mock.store(on)
-  for (const surface of ['terminal', 'vscode'] as const) {
+  await each(['terminal', 'vscode'] as const, async surface => {
     const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     await ui.press({ key: 'details' })
     expect(await ui.find({ type: 'Text', text: /─/ })).toBeDefined()
     expect((await ui.find({ type: 'Box' }))?.props.gap).toBe(0)
     // A fresh session still draws its fixed columns, each a dash until it knows something (.algebra/band.algebra.md).
-    for (const key of ['check', 'regressions', 'reuse', 'spent']) expect(await ui.find({ key })).toBeDefined()
+    await each(['check', 'regressions', 'reuse', 'spent'], async key => expect(await ui.find({ key })).toBeDefined())
     expect(await ui.find({ key: 'model' })).toBeUndefined()
     expect((await ui.findAll({ type: 'Text', text: '–' })).length).toBe(3)
     const spent = (await ui.find({ key: 'spent' }))?.props
@@ -365,7 +432,7 @@ test('the details view has its line without empty rows, and off the terminal its
     // The view is stored, so the next surface would start in details: switch back.
     await ui.press({ key: 'details' })
     await ui.unmount()
-  }
+  })
   // The desktop keeps a gap above its SVG, whose top line would otherwise touch the buttons.
   const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'desktop', ...BAND })
   await ui.press({ key: 'details' })
@@ -390,35 +457,35 @@ test('after /greybeard band the band draws nothing', async ($, on) => {
   await ui.unmount()
 })
 
-for (const command of ['clear', 'resume', 'branch']) {
+;['clear', 'resume', 'branch'].forEach(command => {
   test(`after /${command} the band shows the level again, with no session.start`, async ($, on) => {
     mock.clock(on)
     mock.store(on)
-    let session = 's1'
+    const session = cell('s1')
     on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }))
     on('fs.read', ($, e, next) => (e.path === '/home/u/.claude/.greybeard-active' ? { value: 'full' } : next(e)))
     on('session.repo', () => ({ value: { root: '/repo/shop' } }) as never)
-    on('session.id', () => ({ value: session }))
+    on('session.id', () => ({ value: session.get() }))
     // /clear, /resume and /branch go on under another session id; /help stays in this one.
     on('command.run', ($, e) => {
-      if (e.command !== 'help') session = 's2'
+      if (e.command !== 'help') session.set('s2')
       return { text: '' }
     })
     const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
-    await $.command.run({ command: 'help', args: '' })
+    await $.command.run(typed('help'))
     expect(await ui.find({ key: 'level', text: /full/ })).toBeUndefined()
-    await $.command.run({ command, args: '' })
+    await $.command.run(typed(command))
     expect(await ui.find({ key: 'level', text: /full/ })).toBeDefined()
     await ui.unmount()
   })
-}
+})
 
 test("another plugin's command runs without the band's hook, so its output is not labelled greybeard", async ($, on) => {
-  let reads = 0
-  on('session.id', () => (reads++, { value: 's1' }))
+  const reads = log<string>()
+  on('session.id', () => (reads.note('id'), { value: 's1' }))
   on('command.run', () => ({ text: '' }))
-  await $.command.run({ command: 'anymodel', args: '' })
-  expect(reads).toBe(0)
+  await $.command.run(typed('anymodel'))
+  expect(reads.seen()).toEqual([])
 })
 
 test('the ledger is written on Windows, where there is no mkdir', async ($, on) => {
@@ -433,54 +500,55 @@ test('the ledger is written on Windows, where there is no mkdir', async ($, on) 
   on('process.run', ($, e) => (e.argv[0] === 'mkdir' ? { deny: 'mkdir: not found' } : ({ value: { exitCode: 1, stdout: '', stderr: '' } } as never)))
   on('fs.read', () => ({ deny: 'missing' }) as never)
   on('fs.list', () => ({ value: [] }))
-  const written: string[] = []
+  const written = log<string>()
   on('fs.write', ($, e) => {
     // The engine writes the path with this OS's separator.
-    written.push(e.path.replace(/\\/g, '/'))
+    written.note(e.path.replace(/\\/g, '/'))
     return { value: undefined }
   })
-  const status: unknown[] = []
+  const status = log<unknown>()
   on('ui.status', ($, e) => {
-    status.push(e)
+    status.note(e)
     return { value: undefined }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: 'C:/repo/shop', surface: null } as never)
   await $.turn.complete({ answer: '', durationMs: 1000 } as never)
-  expect(JSON.stringify(status)).not.toContain('could not write the task ledger')
+  expect(JSON.stringify(status.seen())).not.toContain('could not write the task ledger')
   // Off Windows a C: path is relative, so the working dir comes in front of it: compare the end.
-  expect(written.length).toBe(2)
-  expect(written[0]?.endsWith('C:/Users/u/.config/greybeard/band/shop.csv')).toBe(true)
-  expect(written[1]?.endsWith('C:/Users/u/.config/greybeard/band/board.html')).toBe(true)
+  const [csv, board, ...more] = written.seen()
+  expect(more).toEqual([])
+  expect(csv?.endsWith('C:/Users/u/.config/greybeard/band/shop.csv')).toBe(true)
+  expect(board?.endsWith('C:/Users/u/.config/greybeard/band/board.html')).toBe(true)
 })
 
 test('the transcript is found with no classic hook, in its named folder or any other', async ($, on) => {
   mock.clock(on)
   mock.store(on)
-  let session = 's1'
+  const session = cell('s1')
   const projects = '/home/u/.claude/projects'
-  let titles: Record<string, string> = { [`${projects}/-repo-shop-v2/s1.jsonl`]: 'Cart totals' }
+  const titles = cell<Record<string, string>>({ [`${projects}/-repo-shop-v2/s1.jsonl`]: 'Cart totals' })
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }))
   on('session.repo', () => ({ value: { root: '/repo/shop' } }) as never)
   on('session.root', () => ({ value: '/repo/shop.v2' }))
-  on('session.id', () => ({ value: session }))
+  on('session.id', () => ({ value: session.get() }))
   on('session.turns', () => ({ value: 1 }))
   on('session.usage', () => ({ value: { startedAt: 0, cost: { usd: 0.5 } } }) as never)
-  const listed: string[] = []
+  const listed = log<string>()
   on('fs.list', ($, e) => {
-    listed.push(e.path)
+    listed.note(e.path)
     return { value: e.path === projects ? [{ name: '-repo-shop-v2', kind: 'dir' }, { name: 'notes.txt', kind: 'file' }, { name: '-wt', kind: 'dir' }] : [] } as never
   })
-  on('fs.exists', ($, e) => ({ value: e.path in titles }))
+  on('fs.exists', ($, e) => ({ value: e.path in titles.get() }))
   on('process.run', ($, e) => {
-    const title = e.argv[0] === 'grep' && e.argv[1] === '-F' ? titles[e.argv.at(-1) ?? ''] : undefined
+    const title = e.argv[0] === 'grep' && e.argv[1] === '-F' ? titles.get()[e.argv.at(-1) ?? ''] : undefined
     return { value: { exitCode: title ? 0 : 1, stdout: title ? `${JSON.stringify({ type: 'custom-title', customTitle: title })}\n` : '', stderr: '' } } as never
   })
   on('fs.read', () => ({ deny: 'missing' }) as never)
-  const rows: string[] = []
+  const rows = log<string>()
   on('fs.write', ($, e) => {
-    if (e.path.endsWith('shop.csv')) rows.push(e.text)
+    if (e.path.endsWith('shop.csv')) rows.note(e.text)
     return { value: undefined }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -488,18 +556,18 @@ test('the transcript is found with no classic hook, in its named folder or any o
   // Only non-classic events fire, as when cc-plugin-sec-default skips every classic.* hook.
   await $.session.start({ cwd: '/repo/shop.v2', surface: null } as never)
   await $.turn.complete({ answer: '', durationMs: 1000 } as never)
-  expect(rows.at(-1)).toContain('Cart totals')
+  expect(rows.seen().at(-1)).toContain('Cart totals')
   // The folder its rule names held the file, so no folder was listed.
-  expect(listed).not.toContain(projects)
+  expect(listed.seen()).not.toContain(projects)
   // A worktree moves the file under the same id, and the session is renamed there.
-  titles = { [`${projects}/-wt/s1.jsonl`]: 'Cart totals, split' }
+  titles.set({ [`${projects}/-wt/s1.jsonl`]: 'Cart totals, split' })
   await $.turn.complete({ answer: '', durationMs: 1000 } as never)
-  expect(rows.at(-1)).toContain('Cart totals, split')
+  expect(rows.seen().at(-1)).toContain('Cart totals, split')
   // /clear goes on under another id, in a folder the rule does not name (a hashed long name, say).
-  session = 's2'
-  titles = { ...titles, [`${projects}/-wt/s2.jsonl`]: 'Refunds' }
+  session.set('s2')
+  titles.set({ ...titles.get(), [`${projects}/-wt/s2.jsonl`]: 'Refunds' })
   await $.turn.complete({ answer: '', durationMs: 1000 } as never)
-  expect(rows.at(-1)).toContain('Refunds')
+  expect(rows.seen().at(-1)).toContain('Refunds')
 })
 
 test('without HOME (Windows) the band reads its flags under USERPROFILE', async ($, on) => {
@@ -508,17 +576,18 @@ test('without HOME (Windows) the band reads its flags under USERPROFILE', async 
   on('env.get', ($, e) => ({ value: e.name === 'USERPROFILE' ? 'C:\\Users\\u' : undefined }))
   // The engine may hand the path on with either separator, and off Windows a C: path is relative,
   // so the working dir comes in front of it: compare the end.
-  const reads: string[] = []
+  const reads = log<string>()
   on('fs.read', ($, e, next) => {
-    reads.push(e.path.replaceAll('\\', '/'))
-    return reads.at(-1)?.endsWith('C:/Users/u/.claude/.greybeard-band') ? { value: 'off' } : next(e)
+    const path = e.path.replaceAll('\\', '/')
+    reads.note(path)
+    return path.endsWith('C:/Users/u/.claude/.greybeard-band') ? { value: 'off' } : next(e)
   })
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>prompt only</Text>
   })
   const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
-  expect(reads.some(path => path.endsWith('C:/Users/u/.claude/.greybeard-band'))).toBe(true)
+  expect(reads.seen().some(path => path.endsWith('C:/Users/u/.claude/.greybeard-band'))).toBe(true)
   expect(await ui.find({ key: 'level' })).toBeUndefined()
   await ui.unmount()
 })
@@ -531,7 +600,7 @@ test('another mod drawing above the prompt shows below the band, in compact and 
     const { Text } = $.ui.resolve(e)
     return <Text>other band</Text>
   })
-  for (const surface of ['terminal', 'desktop'] as const) {
+  await each(['terminal', 'desktop'] as const, async surface => {
     const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     expect(await ui.find({ key: 'level' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /other band/ })).toBeDefined()
@@ -542,37 +611,36 @@ test('another mod drawing above the prompt shows below the band, in compact and 
     // back to compact for the next surface
     await ui.press({ key: 'details' })
     await ui.unmount()
-  }
+  })
 })
 
 test('review and audit run the same commands a person types', async ($, on) => {
   mock.clock(on)
   mock.store(on)
-  const sent: string[] = []
+  const sent = log<string>()
   on('command.run', ($, e) => {
-    sent.push(`/${e.command} ${e.args}`.trim())
+    sent.note(`/${e.command} ${e.args}`.trim())
     return { text: '' }
   })
   const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
   // The level pill opens the four levels instead of switching: no command, no turn.
   await ui.press({ key: 'level' })
   expect(await ui.find({ key: 'level-ultra' })).toBeDefined()
-  expect(sent).toEqual([])
+  expect(sent.seen()).toEqual([])
   await ui.press({ key: 'level-lite' })
-  expect(sent).toEqual(['/greybeard:greybeard lite'])
-  sent.length = 0
+  expect(sent.seen()).toEqual(['/greybeard:greybeard lite'])
   await ui.press({ key: 'review' })
   await ui.press({ key: 'audit' })
-  expect(sent).toEqual(['/greybeard:greybeard-review', '/greybeard:greybeard-audit'])
+  expect(sent.seen().slice(1)).toEqual(['/greybeard:greybeard-review', '/greybeard:greybeard-audit'])
   await ui.unmount()
 })
 
 test('copy hands the task to the clipboard as Markdown', async ($, on) => {
   mock.clock(on)
   mock.store(on)
-  const copied: string[] = []
+  const copied = log<string>()
   on('ui.copy', ($, e) => {
-    copied.push(e.text)
+    copied.note(e.text)
     return { value: { isCopied: true as const } }
   })
   on('ui.toast', () => ({ value: undefined }))
@@ -580,17 +648,18 @@ test('copy hands the task to the clipboard as Markdown', async ($, on) => {
   await ui.press({ key: 'details' })
   expect(await ui.find({ key: 'task' })).toBeUndefined()
   await ui.press({ key: 'copy' })
-  expect(copied.length).toBe(1)
-  expect(copied[0]).toContain('## Untitled session')
-  expect(copied[0]).toContain('| Turns | 0 |')
+  const [text, ...more] = copied.seen()
+  expect(more).toEqual([])
+  expect(text).toContain('## Untitled session')
+  expect(text).toContain('| Turns | 0 |')
   await ui.unmount()
 })
 
 test('the band reports new failures against the runs before the first edit, in words with no glyphs', async ($, on) => {
   mock.clock(on)
   on('session.repo', () => ({ value: { root: '/repo' } }) as never)
-  let output = 'ℹ pass 13\nℹ fail 1\n✖ csv: pandas one-liner (3ms)'
-  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: output, stderr: '', interrupted: false }, text: output, isError: true }) as never)
+  const output = cell('ℹ pass 13\nℹ fail 1\n✖ csv: pandas one-liner (3ms)')
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: output.get(), stderr: '', interrupted: false }, text: output.get(), isError: true }) as never)
   on('tool.call', { tool: 'Edit' }, () => ({ result: {}, text: 'ok' }) as never)
   const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
 
@@ -606,11 +675,11 @@ test('the band reports new failures against the runs before the first edit, in w
   expect(await ui.find({ type: 'Text', text: /^tests stale$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /\+1 debt/ })).toBeDefined()
 
-  output = 'ℹ pass 12\nℹ fail 2\n✖ csv: pandas one-liner (3ms)\n✖ cart totals (1ms)'
+  output.set('ℹ pass 12\nℹ fail 2\n✖ csv: pandas one-liner (3ms)\n✖ cart totals (1ms)')
   await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
   expect(await ui.find({ type: 'Text', text: /^1 new failure$/ })).toBeDefined()
 
-  output = 'ℹ pass 13\nℹ fail 1\n✖ csv: pandas one-liner (3ms)'
+  output.set('ℹ pass 13\nℹ fail 1\n✖ csv: pandas one-liner (3ms)')
   await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
   expect(await ui.find({ type: 'Text', text: /new failure/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /[✓✗⚠]/ })).toBeUndefined()
@@ -625,17 +694,17 @@ test('at turn end the band reads check findings for touched files and IR drift, 
   on('session.id', () => ({ value: 's1' }))
   on('session.turns', () => ({ value: 1 }))
   on('session.usage', () => ({ value: { startedAt: 0, cost: { usd: 0.5 } } }) as never)
-  const ran: string[] = []
+  const ran = log<string>()
   on('process.run', ($, e) => {
-    ran.push(e.argv.join(' '))
+    ran.note(e.argv.join(' '))
     const gitPath = e.argv.includes('--git-path')
     return { value: { exitCode: gitPath ? 0 : 1, stdout: gitPath ? '/repo/.git/greybeard/findings.json\n' : '', stderr: '' } } as never
   })
-  const findings: Record<string, string[]> = { '/repo/src/A.scala': ['src/A.scala:41 wartremover:Var var is disabled'], '/repo/src/Other.scala': ['src/Other.scala:1 E198 unused'] }
-  let ir = 'types:\n  - name: Lane\n'
+  const findings = cell<Record<string, string[]>>({ '/repo/src/A.scala': ['src/A.scala:41 wartremover:Var var is disabled'], '/repo/src/Other.scala': ['src/Other.scala:1 E198 unused'] })
+  const ir = cell('types:\n  - name: Lane\n')
   on('fs.read', ($, e) => {
-    if (e.path === '/repo/.git/greybeard/findings.json') return { value: JSON.stringify(findings) }
-    if (e.path === '/repo/.algebra/feed.algebra.md') return { value: ir }
+    if (e.path === '/repo/.git/greybeard/findings.json') return { value: JSON.stringify(findings.get()) }
+    if (e.path === '/repo/.algebra/feed.algebra.md') return { value: ir.get() }
     return { deny: 'missing' } as never
   })
   on('fs.list', ($, e) => ({ value: e.path === '/repo/.algebra' ? [{ name: 'feed.algebra.md', kind: 'file' }] : [] }) as never)
@@ -654,11 +723,11 @@ test('at turn end the band reads check findings for touched files and IR drift, 
   expect(await ui.find({ type: 'Text', text: /wartremover:Var/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /ToastLevel not in/ })).toBeDefined()
   await ui.press({ key: 'details' })
-  expect(ran.some(c => /\b(tsc|sbt)\b|greybeard check/.test(c))).toBe(false)
+  expect(ran.seen().some(c => /\b(tsc|sbt)\b|greybeard check/.test(c))).toBe(false)
 
   // The finding is fixed and the type gets its IR: the session reads clean once tests pass.
-  findings['/repo/src/A.scala'] = []
-  ir = 'Lane ToastLevel'
+  findings.set({ ...findings.get(), '/repo/src/A.scala': [] })
+  ir.set('Lane ToastLevel')
   await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
   await $.turn.complete({ answer: '', durationMs: 1000 } as never)
   expect(await ui.find({ type: 'Text', text: /^clean$/ })).toBeDefined()
