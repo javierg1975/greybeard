@@ -1,6 +1,6 @@
 {
   "name": "@javierg1975/greybeard",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Lazy senior dev mode for AI agents. The best code is the code you never wrote.",
   "keywords": ["opencode-plugin", "opencode", "greybeard", "pi-package", "pi", "skills", "qoder"],
   "license": "MIT",
