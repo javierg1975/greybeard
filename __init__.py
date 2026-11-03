@@ -14,7 +14,6 @@ SKILL_COMMANDS = {
     "greybeard-review": "Review the current diff or provided target: bugs, security, load, missing tests, speed, and what to cut.",
     "greybeard-audit": "Audit the whole repo: bugs, security, load, missing tests, speed, and what to cut.",
     "greybeard-debt": "List every deliberate `shortcut:` comment and its upgrade path.",
-    "greybeard-gain": "Show the measured-impact scoreboard (less code, less cost, more speed).",
     "greybeard-help": "Show the Greybeard command reference.",
 }
 

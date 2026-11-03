@@ -51,7 +51,6 @@ codex plugin add greybeard@greybeard
 | `/greybeard-review` | Review the current diff: bugs, security, real load, risky code without a test, slow paths, what to cut. |
 | `/greybeard-audit` | The same check for the whole repo, most important first. |
 | `/greybeard-debt` | Collect `shortcut:` comments into a ledger. |
-| `/greybeard-gain` | Ponytail's measured benchmark scoreboard. |
 | `/greybeard-help` | Quick reference. |
 
 ## `greybeard check`

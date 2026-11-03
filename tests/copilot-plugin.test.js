@@ -13,7 +13,6 @@ const REQUIRED_COMMAND_FILES = [
   'greybeard-review.toml',
   'greybeard-audit.toml',
   'greybeard-debt.toml',
-  'greybeard-gain.toml',
   'greybeard-help.toml',
 ];
 

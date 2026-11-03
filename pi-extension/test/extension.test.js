@@ -65,7 +65,7 @@ function withTempConfig(fn) {
 test("extension registers Greybeard commands", () => {
   const { commands } = createPiHarness();
 
-  assert.deepEqual([...commands.keys()].sort(), ["greybeard", "greybeard-audit", "greybeard-debt", "greybeard-gain", "greybeard-help", "greybeard-review"]);
+  assert.deepEqual([...commands.keys()].sort(), ["greybeard", "greybeard-audit", "greybeard-debt", "greybeard-help", "greybeard-review"]);
 });
 
 test("/greybeard updates session mode and injects instructions", async () => withTempConfig(async () => {
@@ -207,14 +207,12 @@ test("skill alias commands delegate to Pi skill commands", async () => {
   await commands.get("greybeard-review").handler("", ctx);
   await commands.get("greybeard-audit").handler("", ctx);
   await commands.get("greybeard-debt").handler("", ctx);
-  await commands.get("greybeard-gain").handler("", ctx);
   await commands.get("greybeard-help").handler("", ctx);
 
   assert.deepEqual(sentUserMessages.map((entry) => entry.text), [
     "/skill:greybeard-review",
     "/skill:greybeard-audit",
     "/skill:greybeard-debt",
-    "/skill:greybeard-gain",
     "/skill:greybeard-help",
   ]);
 });

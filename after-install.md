@@ -16,7 +16,6 @@ Commands:
 - `/greybeard-review [target]`
 - `/greybeard-audit [target]`
 - `/greybeard-debt`
-- `/greybeard-gain`
 - `/greybeard-help`
 
-Bundled skills are available as `greybeard:greybeard`, `greybeard:greybeard-review`, `greybeard:greybeard-audit`, `greybeard:greybeard-debt`, `greybeard:greybeard-gain`, and `greybeard:greybeard-help`.
+Bundled skills are available as `greybeard:greybeard`, `greybeard:greybeard-review`, `greybeard:greybeard-audit`, `greybeard:greybeard-debt`, and `greybeard:greybeard-help`.

@@ -13,7 +13,6 @@ const SKILL_DIRS = [
   'greybeard-review',
   'greybeard-audit',
   'greybeard-debt',
-  'greybeard-gain',
   'greybeard-help',
 ];
 

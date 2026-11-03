@@ -28,7 +28,6 @@ Level sticks until changed or session end.
 | **greybeard-review** | `/greybeard-review` | Quality review of a diff: bugs, security, load, missing tests, speed, what to cut. Each finding says what goes wrong and how to fix it. Checks code against its `.algebra/` IR blind first; `/greybeard-review drift <module>` runs only that. |
 | **greybeard-audit** | `/greybeard-audit` | The same quality review for the whole repo, ranked. |
 | **greybeard-debt** | `/greybeard-debt` | Harvest `shortcut:` comments into a tracked ledger. |
-| **greybeard-gain** | `/greybeard-gain` | Measured-impact scoreboard: less code, less cost, more speed. |
 | **greybeard-help** | `/greybeard-help` | This card. |
 
 `greybeard check` (CLI and Claude Code hook): runs the Scala or TypeScript profile on changed

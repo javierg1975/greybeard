@@ -21,7 +21,6 @@ const DESCRIPTIONS = {
   'greybeard-review': 'Quality review of a diff: bugs, security, real load, missing tests, speed, and what to delete. Each finding says what goes wrong and how to fix it.',
   'greybeard-audit': 'Quality audit of the whole repo: bugs, security, real load, missing tests, speed, and what to delete. Most important first.',
   'greybeard-debt': 'Harvest every shortcut: comment into one debt ledger, so deferrals get tracked instead of forgotten. One-shot report.',
-  'greybeard-gain': 'Show greybeard measured impact as a scoreboard: less code, less cost, more speed, from the agentic benchmark averages. One-shot display.',
   'greybeard-help': "Quick reference for greybeard's modes, skills, and commands. One-shot display.",
 };
 

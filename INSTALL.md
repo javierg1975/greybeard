@@ -58,7 +58,7 @@ pi install git:github.com/javierg1975/greybeard
 
 ## Kimi Code
 
-In Kimi Code, run `/plugins install https://github.com/javierg1975/greybeard`, then `/reload` or start a new session. The plugin puts [`AGENTS.md`](AGENTS.md) into the system prompt every turn and adds the six skills, which Kimi also offers as `/greybeard`, `/greybeard-review`, `/greybeard-audit`, `/greybeard-debt`, `/greybeard-gain` and `/greybeard-help`. Level switching (`/greybeard lite`) loads the skill for that turn; there is no persistent mode flag in Kimi.
+In Kimi Code, run `/plugins install https://github.com/javierg1975/greybeard`, then `/reload` or start a new session. The plugin puts [`AGENTS.md`](AGENTS.md) into the system prompt every turn and adds the five skills, which Kimi also offers as `/greybeard`, `/greybeard-review`, `/greybeard-audit`, `/greybeard-debt` and `/greybeard-help`. Level switching (`/greybeard lite`) loads the skill for that turn; there is no persistent mode flag in Kimi.
 
 ## Oh My Pi (omp)
 
@@ -108,7 +108,7 @@ Qwen Code installs the same extension: `qwen extensions install javierg1975/grey
 
 ## Qoder
 
-Qoder auto-loads `AGENTS.md` from the repo root as always-on context, so running greybeard from a checkout works with zero setup. For per-project rules, copy [`.qoder/rules/greybeard.md`](.qoder/rules/greybeard.md) into your project's `.qoder/rules/`. The six greybeard skills (`/greybeard`, `/greybeard-review`, `/greybeard-audit`, `/greybeard-debt`, `/greybeard-gain`, `/greybeard-help`) are available via Qoder's Skill system; the plugin manifest at [`.qoder-plugin/plugin.json`](.qoder-plugin/plugin.json) points at the `skills/` directory.
+Qoder auto-loads `AGENTS.md` from the repo root as always-on context, so running greybeard from a checkout works with zero setup. For per-project rules, copy [`.qoder/rules/greybeard.md`](.qoder/rules/greybeard.md) into your project's `.qoder/rules/`. The five greybeard skills (`/greybeard`, `/greybeard-review`, `/greybeard-audit`, `/greybeard-debt`, `/greybeard-help`) are available via Qoder's Skill system; the plugin manifest at [`.qoder-plugin/plugin.json`](.qoder-plugin/plugin.json) points at the `skills/` directory.
 
 For full plugin-tier support (automatic mode activation + ruleset injection on every prompt), install greybeard as a Qoder plugin (`qodercli plugins install <path-to-greybeard>`): the manifest loads [`hooks/qoder-hooks.json`](hooks/qoder-hooks.json) and Qoder fills in `${QODER_PLUGIN_ROOT}`. Without the plugin, copy those hooks into your `.qoder/settings.json` and replace `${QODER_PLUGIN_ROOT}` with the path to your greybeard checkout. Qoder's `UserPromptSubmit` hook activates the default mode on first prompt and injects the ruleset every turn; `PreToolUse` with `task|Task` matcher injects the ruleset into subagents. Level switches (`/greybeard lite|full|ultra|off`) work automatically.
 
@@ -118,7 +118,7 @@ For full plugin-tier support (automatic mode activation + ruleset injection on e
 agy plugin install https://github.com/javierg1975/greybeard
 ```
 
-Installs the six skills, and Antigravity turns the `/greybeard` commands into skills as well, so you [call them as slash commands](https://www.antigravity.google/docs/skills#slash-command-conversion) such as `/greybeard-review`. No lifecycle hooks, so levels don't persist. For the always-on ruleset, copy [`AGENTS.md`](AGENTS.md) into your project; Antigravity [reads it as workspace rules](https://www.antigravity.google/docs/rules). Install verified with Antigravity CLI 1.3.3.
+Installs the five skills, and Antigravity turns the `/greybeard` commands into skills as well, so you [call them as slash commands](https://www.antigravity.google/docs/skills#slash-command-conversion) such as `/greybeard-review`. No lifecycle hooks, so levels don't persist. For the always-on ruleset, copy [`AGENTS.md`](AGENTS.md) into your project; Antigravity [reads it as workspace rules](https://www.antigravity.google/docs/rules). Install verified with Antigravity CLI 1.3.3.
 
 ## Hermes Agent
 
@@ -133,7 +133,7 @@ git clone https://github.com/javierg1975/greybeard.git ~/.hermes/plugins/greybea
 hermes plugins enable greybeard
 ```
 
-Restart Hermes after installing. The plugin injects the active Greybeard mode before each LLM turn, registers the bundled skills as `greybeard:<skill>`, and adds `/greybeard`, `/greybeard-review`, `/greybeard-audit`, `/greybeard-debt`, `/greybeard-gain`, and `/greybeard-help`. In shared gateways, restrict `/greybeard` to trusted users with Hermes slash-command access controls; runtime mode is process-local.
+Restart Hermes after installing. The plugin injects the active Greybeard mode before each LLM turn, registers the bundled skills as `greybeard:<skill>`, and adds `/greybeard`, `/greybeard-review`, `/greybeard-audit`, `/greybeard-debt`, and `/greybeard-help`. In shared gateways, restrict `/greybeard` to trusted users with Hermes slash-command access controls; runtime mode is process-local.
 
 ## CodeWhale
 
@@ -153,7 +153,7 @@ Installs greybeard as a Devin plugin; skills are available as `/greybeard:greybe
 clawhub install greybeard
 ```
 
-Installs greybeard as an OpenClaw skill from ClawHub; the review, audit, debt, gain, and help skills install the same way (`clawhub install greybeard-review`, and so on). OpenClaw applies it on coding tasks and also exposes it as a `/greybeard` command. Without ClawHub, copy [`.openclaw/skills/greybeard`](.openclaw/skills/) into `~/.openclaw/skills/`.
+Installs greybeard as an OpenClaw skill from ClawHub; the review, audit, debt and help skills install the same way (`clawhub install greybeard-review`, and so on). OpenClaw applies it on coding tasks and also exposes it as a `/greybeard` command. Without ClawHub, copy [`.openclaw/skills/greybeard`](.openclaw/skills/) into `~/.openclaw/skills/`.
 
 ## Grok Build
 
@@ -168,7 +168,7 @@ Enable the plugin (off by default): `/plugins` → Plugins → Space on `greybea
 enabled = ["greybeard"]
 ```
 
-Start a new session (or reload plugins). Skills show as `/greybeard`, `/greybeard-review`, `/greybeard-audit`, `/greybeard-debt`, `/greybeard-gain`, `/greybeard-help`. Verify with `grok inspect`. Grok can auto-invoke greybeard for coding tasks from its skill description; use `/greybeard` (or `/greybeard lite`, `/greybeard full`, `/greybeard ultra`) when activation needs to be explicit. Grok lifecycle hooks are not used because their SessionStart output cannot inject instructions.
+Start a new session (or reload plugins). Skills show as `/greybeard`, `/greybeard-review`, `/greybeard-audit`, `/greybeard-debt`, `/greybeard-help`. Verify with `grok inspect`. Grok can auto-invoke greybeard for coding tasks from its skill description; use `/greybeard` (or `/greybeard lite`, `/greybeard full`, `/greybeard ultra`) when activation needs to be explicit. Grok lifecycle hooks are not used because their SessionStart output cannot inject instructions.
 
 `AGENTS.md` still works instruction-only from a checkout without the plugin.
 
@@ -178,7 +178,7 @@ Start a new session (or reload plugins). Skills show as `/greybeard`, `/greybear
 goose plugin install https://github.com/javierg1975/greybeard.git
 ```
 
-That imports the six skills as `greybeard:greybeard`, `greybeard:greybeard-review` and so on. For the always-on rules, copy [`AGENTS.md`](AGENTS.md) to `~/.agents/AGENTS.md` (or into your project; `~/.config/goose/.goosehints` works too). Goose has no lifecycle hooks, so the levels don't persist.
+That imports the five skills as `greybeard:greybeard`, `greybeard:greybeard-review` and so on. For the always-on rules, copy [`AGENTS.md`](AGENTS.md) to `~/.agents/AGENTS.md` (or into your project; `~/.config/goose/.goosehints` works too). Goose has no lifecycle hooks, so the levels don't persist.
 
 ## Cursor
 
@@ -197,13 +197,13 @@ While active, the ruleset is also injected into every subagent spawned via the A
 
 ## Skills CLI
 
-The [skills CLI](https://skills.sh) copies the six greybeard skills into the skills folder of many agents:
+The [skills CLI](https://skills.sh) copies the five greybeard skills into the skills folder of many agents:
 
 ```bash
 npx skills add javierg1975/greybeard
 ```
 
-Pick the agent with `--agent` (for IBM Bob: `--agent bob`), take all six without asking with `--skill '*'`, and add `--global` to install for your user instead of the project. This installs the skills only; for the always-on ruleset, also add [`AGENTS.md`](AGENTS.md) or use one of the plugins above.
+Pick the agent with `--agent` (for IBM Bob: `--agent bob`), take all five without asking with `--skill '*'`, and add `--global` to install for your user instead of the project. This installs the skills only; for the always-on ruleset, also add [`AGENTS.md`](AGENTS.md) or use one of the plugins above.
 
 ## Other agents (rules file only)
 
@@ -231,7 +231,7 @@ Jules (Google) reads `AGENTS.md` from the repository root, which this repo ships
 | Grok Build | `grok plugin uninstall greybeard` |
 | Pi agent | `pi uninstall greybeard` |
 | Kimi Code | `/plugins` in Kimi Code, then remove greybeard |
-| Skills CLI | `npx skills remove greybeard greybeard-audit greybeard-debt greybeard-gain greybeard-help greybeard-review` (same `--agent` / `--global` flags as the install) |
+| Skills CLI | `npx skills remove greybeard greybeard-audit greybeard-debt greybeard-help greybeard-review` (same `--agent` / `--global` flags as the install) |
 | Oh My Pi (omp) | `omp plugin uninstall greybeard@greybeard`, then `omp plugin marketplace remove greybeard` |
 | OpenCode | `opencode plugin remove @javierg1975/greybeard` |
 | Cursor hooks | `node scripts/cursor-hooks.js uninstall` (add `--project` for a project-level install); removes only greybeard's entries from `hooks.json` |

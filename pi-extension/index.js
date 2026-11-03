@@ -170,11 +170,6 @@ export default function greybeardExtension(pi) {
     handler: (args, ctx) => sendAlias("/skill:greybeard-audit", args, ctx),
   });
 
-  pi.registerCommand("greybeard-gain", {
-    description: "Run /skill:greybeard-gain",
-    handler: (args, ctx) => sendAlias("/skill:greybeard-gain", args, ctx),
-  });
-
   pi.registerCommand("greybeard-debt", {
     description: "Run /skill:greybeard-debt",
     handler: (args, ctx) => sendAlias("/skill:greybeard-debt", args, ctx),

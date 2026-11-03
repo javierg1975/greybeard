@@ -11,7 +11,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { filterSkillBodyForMode } = require('../hooks/greybeard-instructions');
 
-const commands = ['greybeard', 'greybeard-review', 'greybeard-audit', 'greybeard-debt', 'greybeard-gain', 'greybeard-help'];
+const commands = ['greybeard', 'greybeard-review', 'greybeard-audit', 'greybeard-debt', 'greybeard-help'];
 const skillCommands = commands.filter((name) => name !== 'greybeard');
 
 const root = path.join(__dirname, '..');
@@ -91,7 +91,6 @@ print(json.dumps({'skills': ctx.skills, 'hooks': ctx.hooks, 'commands': ctx.comm
     'greybeard',
     'greybeard-audit',
     'greybeard-debt',
-    'greybeard-gain',
     'greybeard-help',
     'greybeard-review',
   ]);

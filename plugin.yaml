@@ -10,12 +10,10 @@ provides_commands:
   - greybeard-review
   - greybeard-audit
   - greybeard-debt
-  - greybeard-gain
   - greybeard-help
 provides_skills:
   - greybeard
   - greybeard-review
   - greybeard-audit
   - greybeard-debt
-  - greybeard-gain
   - greybeard-help
