@@ -716,6 +716,12 @@ test('at turn end the band reads check findings for touched files and IR drift, 
   on('turn.complete', () => ({ text: '' }))
   const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
 
+  // The repo keeps IRs, but the session has added no type yet: no model column, not a dash.
+  await $.turn.complete({ answer: '', durationMs: 1000 } as never)
+  await ui.press({ key: 'details' })
+  expect(await ui.find({ key: 'model' })).toBeUndefined()
+  await ui.press({ key: 'details' })
+
   await $.tool.call({ tool: 'Edit', file_path: '/repo/src/A.scala', old_string: 'x', new_string: 'enum ToastLevel:\n  case Info\ncase class Lane(n: Int)', replace_all: false } as never)
   await $.turn.complete({ answer: '', durationMs: 1000 } as never)
   // Only the touched file's finding counts; Lane is in an IR, ToastLevel is not.
@@ -733,5 +739,8 @@ test('at turn end the band reads check findings for touched files and IR drift, 
   await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
   await $.turn.complete({ answer: '', durationMs: 1000 } as never)
   expect(await ui.find({ type: 'Text', text: /^clean$/ })).toBeDefined()
+  await ui.press({ key: 'details' })
+  expect(await ui.find({ type: 'Text', text: /^in sync$/ })).toBeDefined()
+  await ui.press({ key: 'details' })
   await ui.unmount()
 })

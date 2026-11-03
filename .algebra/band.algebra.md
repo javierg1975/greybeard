@@ -59,7 +59,7 @@ types:
   - name: HasIr
     kind: alias
     wraps: boolean
-    purpose: The repo has at least one .algebra/*.md; read at each turn end, so the model column knows whether the project keeps IRs.
+    purpose: The repo has at least one .algebra/*.md; read at each turn end, so new types in a project that keeps IRs show as in sync, and in one that keeps none show nothing.
 
   - name: TurnFacts
     kind: product
@@ -182,7 +182,7 @@ effects:
 cross_cutting:
   - concern: fixed columns
     affects: [band, board]
-    constraint: "The band's details view always shows reuse, regressions, check and spent in that order, and model after reuse when the repo has .algebra/; callers and debt appear only when they have something. A value not known yet is a dash, never a number, so the layout stays put and nothing unknown looks clean."
+    constraint: "The band's details view always shows reuse, regressions, check and spent in that order. Model (after reuse), callers and debt appear only when they have something: model once the session adds domain types in a repo that keeps IRs, as IR drift or in sync. A value not known yet is a dash, never a number, so the layout stays put and nothing unknown looks clean."
     validation_strategy: A band test renders a fresh session and finds the four columns with dashes.
   - concern: no new compiler runs
     affects: [band]

@@ -452,8 +452,8 @@ export const register: Register = (on, options) => {
       reuse !== undefined ? { key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` } : dash('reuse', 'no new code yet'),
       ...(b.drift.length > 0
         ? [{ key: 'model', label: 'model', value: 'IR drift', sub: `${b.drift.slice(0, 2).join(', ')} not in .algebra/`, tone: 'warning' } as const]
-        : b.hasIr
-          ? [b.types.length > 0 ? ({ key: 'model', label: 'model', value: 'in sync', sub: 'new types are in .algebra/', tone: 'success' } as const) : dash('model', 'no new types')]
+        : b.hasIr && b.types.length > 0
+          ? [{ key: 'model', label: 'model', value: 'in sync', sub: 'new types are in .algebra/', tone: 'success' } as const]
           : []),
       showSuite
         ? { key: 'regressions', label: 'regressions', value: suite.kind === 'passing' ? 'none' : suiteLabel(suite), sub: suiteSub, tone: suiteTone }
