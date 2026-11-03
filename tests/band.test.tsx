@@ -356,9 +356,12 @@ test('the details view has its line without empty rows, and off the terminal its
     await ui.press({ key: 'details' })
     expect(await ui.find({ type: 'Text', text: /─/ })).toBeDefined()
     expect((await ui.find({ type: 'Box' }))?.props.gap).toBe(0)
-    // A fresh session has only the spend meter to show, so it takes the row.
+    // A fresh session still draws its fixed columns, each a dash until it knows something (.algebra/band.algebra.md).
+    for (const key of ['check', 'regressions', 'reuse', 'spent']) expect(await ui.find({ key })).toBeDefined()
+    expect(await ui.find({ key: 'model' })).toBeUndefined()
+    expect((await ui.findAll({ type: 'Text', text: '–' })).length).toBe(3)
     const spent = (await ui.find({ key: 'spent' }))?.props
-    expect(surface === 'terminal' ? spent?.width : spent?.flexGrow).toBe(surface === 'terminal' ? 98 : 1)
+    expect(surface === 'terminal' ? spent?.width : spent?.flexGrow).toBe(surface === 'terminal' ? 23 : 1)
     // The view is stored, so the next surface would start in details: switch back.
     await ui.press({ key: 'details' })
     await ui.unmount()

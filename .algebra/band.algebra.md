@@ -56,6 +56,11 @@ types:
       - { name: first, type: string, constraints: ["the first open finding as check prints it, with its line"] }
       - { name: fixed, type: number, constraints: [">= 0", "keys open at an earlier turn end and gone at a later one"] }
 
+  - name: HasIr
+    kind: alias
+    wraps: boolean
+    purpose: The repo has at least one .algebra/*.md; read at each turn end, so the model column knows whether the project keeps IRs.
+
   - name: Task
     kind: product
     purpose: One ledger row as the board reads it; quality leads, cost and tokens follow.
@@ -134,6 +139,10 @@ effects:
     idempotent: true
 
 cross_cutting:
+  - concern: fixed columns
+    affects: [band, board]
+    constraint: "The band's details view always shows check, regressions, reuse and spent, and model when the repo has .algebra/; callers and debt appear only when they have something. A value not known yet is a dash, never a number, so the layout stays put and nothing unknown looks clean."
+    validation_strategy: A band test renders a fresh session and finds the four columns with dashes.
   - concern: no new compiler runs
     affects: [band]
     constraint: The band only reads what greybeard check and the test runner already produced in the session.

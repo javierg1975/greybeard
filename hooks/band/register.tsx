@@ -68,6 +68,7 @@ const EMPTY: Band = {
   findings: NO_FINDINGS,
   types: [],
   drift: [],
+  hasIr: false,
   debtAdded: 0,
   debtResolved: 0,
   debtAt: '',
@@ -373,8 +374,8 @@ export const register: Register = (on, options) => {
     const gitPath = await $.process.run(['git', 'rev-parse', '--path-format=absolute', '--git-path', 'greybeard/findings.json']).catch(() => undefined)
     const json = gitPath?.exitCode === 0 ? await $.fs.read(gitPath.stdout.trim()).catch(() => undefined) : undefined
     const irDir = `${root}/.algebra`
-    const irFiles = before.types.length > 0 ? (await $.fs.list(irDir).catch(() => [])).filter(f => f.kind === 'file' && f.name.endsWith('.md')) : []
-    const irs = await Promise.all(irFiles.map(f => $.fs.read(`${irDir}/${f.name}`).catch(() => '')))
+    const irFiles = (await $.fs.list(irDir).catch(() => [])).filter(f => f.kind === 'file' && f.name.endsWith('.md'))
+    const irs = before.types.length > 0 ? await Promise.all(irFiles.map(f => $.fs.read(`${irDir}/${f.name}`).catch(() => ''))) : []
 
     const b = await update($, band, x => {
       const b = current(x)
@@ -400,6 +401,7 @@ export const register: Register = (on, options) => {
         findings: json === undefined ? b.findings : advanceFindings(b.findings, findingsFor(json, b.touched)),
         // Only a project that keeps IRs is held to them.
         drift: irFiles.length > 0 ? irDrift(b.types, irs) : [],
+        hasIr: irFiles.length > 0,
       }
     })
     await record($, b, options).catch(() => $.ui.status('greybeard band: could not write the task ledger'))
@@ -476,21 +478,26 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // Only columns that say something, in order of urgency; spend is the meter at the end.
+    // Fixed columns in order of urgency, a dash until there is something to say; spend is the meter at the end.
+    // Callers and debt join only when they have something (.algebra/band.algebra.md).
     const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+    const dash = (key: string, sub: string): Col => ({ key, label: key, value: '–', sub, tone: 'muted' })
     const cols: Col[] = []
-    if (b.findings.known && b.touched.length > 0) {
-      cols.push(findings > 0
-        ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first, tone: 'warning' }
-        : { key: 'check', label: 'check', value: 'clean', sub: b.findings.fixed > 0 ? `${b.findings.fixed} fixed` : '', tone: 'success' })
-    }
+    cols.push(!b.findings.known
+      ? dash('check', 'greybeard check not run')
+      : b.touched.length === 0
+        ? dash('check', 'no files touched yet')
+        : findings > 0
+          ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first, tone: 'warning' }
+          : { key: 'check', label: 'check', value: 'clean', sub: b.findings.fixed > 0 ? `${b.findings.fixed} fixed` : '', tone: 'success' })
     if (b.drift.length > 0) cols.push({ key: 'model', label: 'model', value: 'IR drift', sub: `${b.drift.slice(0, 2).join(', ')} not in .algebra/`, tone: 'warning' })
+    else if (b.hasIr) cols.push(b.types.length > 0 ? { key: 'model', label: 'model', value: 'in sync', sub: 'new types are in .algebra/', tone: 'success' } : dash('model', 'no new types'))
     if (showSuite) {
       const sub = suite.kind === 'new-failures' ? suite.names.slice(0, 2).join(', ') : suite.kind === 'failing' ? 'no earlier run to compare' : suite.kind === 'stale' ? 'code changed since the last run' : suite.kind === 'passing' ? (b.created.length > 0 && !b.testEdited ? 'new logic, no test edited' : 'no new failures') : ''
       cols.push({ key: 'regressions', label: 'regressions', value: suite.kind === 'passing' ? 'none' : suiteLabel(suite), sub, tone: suiteTone })
-    }
+    } else cols.push(dash('regressions', 'no tests run yet'))
     if (hasOpen) cols.push({ key: 'callers', label: 'callers', value: `${b.openCallers.length} open`, sub: b.openCallers.slice(0, 2).join(', '), tone: 'warning' })
-    if (reuse !== undefined) cols.push({ key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` })
+    cols.push(reuse !== undefined ? { key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` } : dash('reuse', 'no new code yet'))
     if (b.debtAdded > 0 || b.debtResolved > 0) {
       cols.push({ key: 'debt', label: 'debt', value: `+${b.debtAdded} −${b.debtResolved}`, sub: b.debtAt === '' ? '' : `last added in ${b.debtAt}` })
     }

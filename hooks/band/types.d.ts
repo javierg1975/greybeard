@@ -44,6 +44,8 @@ export type Band = {
   findings: Findings
   types: string[]
   drift: string[]
+  // The repo keeps IRs (.algebra/*.md): only then does the band show the model column.
+  hasIr: boolean
   debtAdded: number
   debtResolved: number
   debtAt: string
