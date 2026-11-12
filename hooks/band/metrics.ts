@@ -1,13 +1,10 @@
 // Pure helpers for the band: no `$`, so the tests call them directly.
 
 import { duration, elapsed, fmtTokens, parseCsv } from './board'
-import type { Band, Findings, Run, Suite, Tests, Tokens } from './types'
+import { copyDelta, SKIP_DIR, SKIP_FILE, withScan } from './copies'
+import type { Band, CopyScan, Findings, Run, Suite, Tests, Tokens } from './types'
 
 export { duration, elapsed, fmtTokens }
-
-// Same skip rules as greybeard-map.js: tests, vendored and generated code are not "reuse".
-const SKIP_DIR = /(^|\/)(node_modules|\.git|dist|build|out|vendor|venv|\.venv|__pycache__|coverage|\.next|target|migrations|fixtures|tests?|__tests__|spec)(\/|$)/
-const SKIP_FILE = /(^|\/)(test_[^/]*|[^/]*(_test|\.test|\.spec|\.gen|\.min|\.d)\.[a-z]+)$/
 
 // Top-level definitions per language, close to greybeard-map.js, plus plain JS functions.
 // shortcut: regex, not a parser; nested and dynamic definitions are missed. Use tree-sitter if it matters.
@@ -44,12 +41,6 @@ export const isTestFile = (file: string) => /(^|\/)(tests?|__tests__|spec)\//.te
 // `shortcut:` comments in a piece of text: greybeard's marker for a deliberate limit.
 export const shortcuts = (text: string) => (text.match(/\bshortcut:/g) ?? []).length
 
-// Lines worth a closer look; the per-language regexes above decide.
-export const GREP_DEFS = '^[[:space:]]*(export|async|def|class|function|func|pub|fn)[[:space:]]'
-
-// Names too generic to say anything about reuse.
-const GENERIC = new Set(['main', 'init', 'run', 'get', 'set', 'test', 'setup', 'open', 'close', 'read', 'write', 'start', 'stop', 'load', 'save', 'update', 'create', 'delete', 'handle', 'render', 'index', 'new', 'call', 'apply'])
-
 export const isCode = (file: string) => DEFS.some(([ext]) => ext.test(file))
 
 export const isSource = (file: string) => isCode(file) && !SKIP_DIR.test(file) && !SKIP_FILE.test(file)
@@ -68,26 +59,10 @@ export const hits = (stdout: string): Hit[] =>
     return m ? [{ file: m[1] ?? '', line: m[2] ?? '', text: m[3] ?? '' }] : []
   })
 
-// Existing definitions, name -> "file:line".
-export function parseDefs(stdout: string): Map<string, string> {
-  const defs = hits(stdout)
-    .filter(hit => isSource(hit.file))
-    .flatMap(hit => defsIn(hit.file, hit.text.trimStart()).map(name => [name, `${hit.file}:${hit.line}`] as const))
-  // The first definition of a name wins and keeps its place.
-  const first = new Map(defs.map(([name], i) => [name, i] as const).toReversed())
-  return new Map(defs.filter(([name], i) => first.get(name) === i))
-}
-
 // Lines of `after` that `before` did not have: what an edit added.
 export function addedLines(before: string, after: string): string {
   const old = new Set(before.split('\n'))
   return after.split('\n').filter(line => !old.has(line)).join('\n')
-}
-
-// Known names the added code calls, skipping its own new definitions.
-export function callsIn(text: string, known: Map<string, string>, own: string[]): string[] {
-  const calls = [...text.matchAll(/(?<![\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map(m => m[1] ?? '')
-  return [...new Set(calls.filter(name => known.has(name) && !own.includes(name) && !GENERIC.has(name.toLowerCase())))]
 }
 
 // Whether a file lies under the project root; Windows paths may use either slash.
@@ -247,6 +222,8 @@ export type TurnFacts = {
   findingsJson: string | undefined
   // undefined: the repo keeps no IR.
   irs: string[] | undefined
+  // undefined: no git repo, or too many files to scan.
+  scan: CopyScan | undefined
 }
 
 // The file:line calls of a removed name that git grep still finds; none once the name is defined again.
@@ -283,6 +260,7 @@ export function afterTurn(b: Band, f: TurnFacts): Band {
     // Only a project that keeps IRs is held to them.
     drift: f.irs === undefined ? [] : irDrift(b.types, f.irs),
     hasIr: f.irs !== undefined,
+    copies: f.scan === undefined ? b.copies : withScan(b.copies, f.scan),
   }
 }
 
@@ -334,9 +312,10 @@ export type Snapshot = {
   turns: number
   agentMs: number
   tokens: Tokens
-  reuse: number | null
-  reused: number
-  created: number
+  // Exact copies in the repo; null until a scan finished.
+  copies: number | null
+  copiesAdded: number
+  copiesFixed: number
   callersOpen: number
   tests: string
   findingsOpen: number | null
@@ -382,9 +361,9 @@ export function snapshot(b: Band, startedAt: number): Snapshot {
     turns: b.turns,
     agentMs: b.busyMs,
     tokens: b.tokens,
-    reuse: percent(b.reused.length, b.created.length) ?? null,
-    reused: b.reused.length,
-    created: b.created.length,
+    copies: b.copies.known ? b.copies.exact.length : null,
+    copiesAdded: copyDelta(b.copies).added.length,
+    copiesFixed: copyDelta(b.copies).fixed,
     callersOpen: b.openCallers.length,
     tests: suiteLabel(suiteOf(b.tests)),
     findingsOpen: b.findings.known ? b.findings.open.length : null,
@@ -407,7 +386,7 @@ export function markdown(s: Snapshot): string {
     ['Turns', `${s.turns}`],
     ['Agent time', `${elapsed(s.agentMs)} · ⌀ ${elapsed(per(s.agentMs, s.turns))} / turn`],
     ['Tokens', `${fmtTokens(totalTokens(t))} (input ${fmtTokens(t.input)}, output ${fmtTokens(t.output)}, cache read ${fmtTokens(t.cacheRead)}, cache write ${fmtTokens(t.cacheWrite)})`],
-    ['Reuse', `${s.reuse === null ? '–' : `${s.reuse}%`} (${s.reused} used, ${s.created} new)`],
+    ['Copies', s.copies === null ? '–' : `${s.copies} in the repo (${s.copiesAdded} added, ${s.copiesFixed} removed this task)`],
     ['Check findings', s.findingsOpen === null ? '–' : `${s.findingsOpen} open, ${s.findingsFixed} fixed`],
     ['IR drift', `${s.irDrift}`],
     ['Callers open', `${s.callersOpen}`],
@@ -420,7 +399,7 @@ export function markdown(s: Snapshot): string {
   return [`## ${cell(s.name || 'Untitled session')}`, '', '| | |', '|---|---|', ...rows.map(([k, v]) => `| ${k} | ${cell(v ?? '')} |`)].join('\n')
 }
 
-export const CSV_HEADER = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,reuse_pct,reused,new,callers_open,tests,level,model,findings_open,findings_fixed,ir_drift,debt_added,debt_resolved'
+export const CSV_HEADER = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,copies,copies_added,copies_fixed,callers_open,tests,level,model,findings_open,findings_fixed,ir_drift,debt_added,debt_resolved'
 
 const csvField = (v: string | number | null) => {
   const s = v === null ? '' : String(v)
@@ -428,7 +407,7 @@ const csvField = (v: string | number | null) => {
 }
 
 export const csvRow = (s: Snapshot) =>
-  [s.key, s.started, s.project, s.name, s.cost.toFixed(2), s.turns, (s.agentMs / 60000).toFixed(1), totalTokens(s.tokens), s.tokens.output, s.reuse, s.reused, s.created, s.callersOpen, s.tests, s.level, s.model,
+  [s.key, s.started, s.project, s.name, s.cost.toFixed(2), s.turns, (s.agentMs / 60000).toFixed(1), totalTokens(s.tokens), s.tokens.output, s.copies, s.copiesAdded, s.copiesFixed, s.callersOpen, s.tests, s.level, s.model,
     s.findingsOpen, s.findingsFixed, s.irDrift, s.debtAdded, s.debtResolved]
     .map(csvField)
     .join(',')
@@ -438,10 +417,6 @@ export function upsertCsv(existing: string, s: Snapshot): string {
   const rows = existing.split('\n').filter(line => line !== '' && !line.startsWith('key,') && !line.startsWith(`${s.key},`))
   return [CSV_HEADER, ...rows, csvRow(s)].join('\n') + '\n'
 }
-
-// shortcut: no share below 3 functions, where one new helper would read as "0% reuse"; tune the 3 if it shows too late.
-export const percent = (reused: number, created: number) =>
-  reused + created < 3 ? undefined : Math.round((reused / (reused + created)) * 100)
 
 export type WebhookRequest = { url: string; init: { method: 'POST'; headers: Record<string, string>; body: string } }
 

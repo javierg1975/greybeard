@@ -11,7 +11,7 @@ const { StringDecoder } = require('string_decoder');
 const { getClaudeDir } = require('./greybeard-config');
 
 // The band's columns (CSV_HEADER in hooks/band/metrics.ts; a test keeps the two equal).
-const CSV_HEADER = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,reuse_pct,reused,new,callers_open,tests,level,model,findings_open,findings_fixed,ir_drift,debt_added,debt_resolved';
+const CSV_HEADER = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,copies,copies_added,copies_fixed,callers_open,tests,level,model,findings_open,findings_fixed,ir_drift,debt_added,debt_resolved';
 
 // USD per million tokens from https://platform.claude.com/docs/en/about-claude/pricing, checked
 // 2026-10-17: [input, 5-minute cache write, 1-hour cache write, cache read, output]. Opus 5.5 and

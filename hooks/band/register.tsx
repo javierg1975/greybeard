@@ -1,17 +1,17 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { beadLine, beadsFrom, epicOf, explainPrompt, NO_BEADS } from './beads'
 import { boardHtml, tasksFrom } from './board'
-import type { Band } from './types'
+import { COPY_PATHSPECS, copiesOf, copyCount, copyDelta, copyLabel, fnsIn, isCopySource, NO_COPIES, NO_INDEX, rebase, reindex, toReread, withScan } from './copies'
+import type { Band, Beads, CopyScan, Fn } from './types'
 import type { Col, TurnFacts } from './metrics'
 import {
   addedLines,
   addTokens,
   afterTurn,
-  callsIn,
   defsIn,
   elapsed,
-  GREP_DEFS,
   inProject,
   isCode,
   isSource,
@@ -24,8 +24,6 @@ import {
   NO_FINDINGS,
   NO_TESTS,
   NO_TOKENS,
-  parseDefs,
-  percent,
   resume,
   runOf,
   sessionTitle,
@@ -55,7 +53,6 @@ const EMPTY: Band = {
   project: '',
   session: '',
   transcript: '',
-  reused: [],
   created: [],
   removed: [],
   openCallers: [],
@@ -70,6 +67,8 @@ const EMPTY: Band = {
   debtResolved: 0,
   debtAt: '',
   details: false,
+  copies: NO_COPIES,
+  beads: NO_BEADS,
 }
 // The counters of one task: what a new session or /clear starts over.
 const TASK = {
@@ -80,7 +79,6 @@ const TASK = {
   busyMs: 0,
   name: '',
   model: '',
-  reused: [],
   created: [],
   removed: [],
   openCallers: [],
@@ -95,8 +93,7 @@ const TASK = {
   debtAt: '',
 }
 const band = atom({ plugin: 'greybeard', key: 'band' } as const, EMPTY)
-const known = atom({ plugin: 'greybeard', key: 'known' } as const, {} as Record<string, string>)
-const remember = ($: EngineInterface, defs: Map<string, string>) => update($, known, () => Object.fromEntries(defs))
+const copyIndex = atom({ plugin: 'greybeard', key: 'copyIndex' } as const, NO_INDEX)
 // State kept from an older version of the band lacks newer fields, and its tests had another shape.
 const current = (b: Band): Band => {
   const x = { ...EMPTY, ...b }
@@ -225,9 +222,67 @@ async function openBoard($: EngineInterface) {
   await $.process.run(windows ? ['cmd', '/c', 'start', '', file] : [mac ? 'open' : 'xdg-open', file])
 }
 
-// Sets the band up for a session (level, project, task row, cost baseline); returns the definitions that exist now.
-async function start($: EngineInterface): Promise<Map<string, string>> {
-  const grep = await $.process.run(['git', 'grep', '--untracked', '-nE', GREP_DEFS]).catch(() => undefined)
+const git = async ($: EngineInterface, args: string[]) => {
+  const r = await $.process.run(['git', ...args]).catch(() => undefined)
+  return r?.exitCode === 0 ? r.stdout : undefined
+}
+const linesOf = (out: string | undefined) => (out ?? '').split('\n').filter(l => l !== '')
+
+// shortcut: a repo with more source files than this shows no copies; scan in a worker if big monorepos need it.
+const MAX_SCAN_FILES = 3000
+
+// The repo's copies: every source file the first time, then only what changed since (CopyIndex in .algebra/band.algebra.md).
+async function scanCopies($: EngineInterface): Promise<CopyScan | undefined> {
+  const root = await $.session.cwd()
+  const listed = await git($, ['ls-files', '-co', '--exclude-standard', '--', ...COPY_PATHSPECS])
+  if (listed === undefined) return undefined
+  const head = (await git($, ['rev-parse', 'HEAD']))?.trim() ?? ''
+  const dirty = [...linesOf(await git($, ['diff', '--name-only', '--relative', 'HEAD'])), ...linesOf(await git($, ['ls-files', '-o', '--exclude-standard']))].filter(isCopySource)
+  const idx = await read($, copyIndex)
+  const full = idx.root !== root
+  const headChanged = !full && idx.head !== '' && idx.head !== head ? linesOf(await git($, ['diff', '--name-only', '--relative', idx.head, head])) : []
+  const files = full ? linesOf(listed).filter(isCopySource) : toReread(idx, dirty, headChanged)
+  if (files.length > MAX_SCAN_FILES) return undefined
+  // A file that cannot be read (deleted, over $.fs.read's limit) leaves the index.
+  const texts = await Promise.all(files.map(async f => [f, await $.fs.read(`${root}/${f}`).then(t => fnsIn(f, t), () => undefined)] as const))
+  const parsed: Record<string, Fn[] | undefined> = Object.fromEntries(texts)
+  const next = reindex(full ? { ...NO_INDEX, root } : idx, head, dirty, parsed)
+  await update($, copyIndex, () => next)
+  return copiesOf(next.files)
+}
+
+// shortcut: the session-start scan runs in the background, so an edit made before it ends can join the baseline; await it if that shows.
+const scanInBackground = ($: EngineInterface) =>
+  void scanCopies($)
+    .then(scan => (scan === undefined ? undefined : update($, band, b => ({ ...current(b), copies: withScan(current(b).copies, scan) }))))
+    .catch(() => undefined)
+
+const bd = async ($: EngineInterface, args: string[]) => {
+  const r = await $.process.run(['bd', ...args, '--json']).catch(() => undefined)
+  return r?.exitCode === 0 ? r.stdout : undefined
+}
+
+// Read-only bd calls; no bd or no beads database reads as none.
+async function readBeads($: EngineInterface): Promise<Beads> {
+  const inProgress = await bd($, ['list', '--status', 'in_progress', '-n', '0'])
+  if (inProgress === undefined) return NO_BEADS
+  const epic = epicOf(inProgress)
+  const [ready, shown, children] = await Promise.all([
+    bd($, ['ready', ...(epic === undefined ? [] : ['--parent', epic]), '-n', '1']),
+    epic === undefined ? undefined : bd($, ['show', epic]),
+    epic === undefined ? undefined : bd($, ['list', '--parent', epic, '--all', '-n', '0']),
+  ])
+  return beadsFrom(inProgress, ready, shown, children)
+}
+
+// Each bd call takes about half a second, so beads never hold up a turn.
+const refreshBeads = ($: EngineInterface) =>
+  void readBeads($)
+    .then(beads => update($, band, b => ({ ...current(b), beads })))
+    .catch(() => undefined)
+
+// Sets the band up for a session (level, project, task row, cost baseline).
+async function start($: EngineInterface): Promise<void> {
   const level = await readLevel($)
   const details = (await $.store.get('details')) === true
   const repo = await $.session.repo().catch(() => null)
@@ -238,12 +293,13 @@ async function start($: EngineInterface): Promise<Map<string, string>> {
   const csv = usage ? await $.fs.read(ledgerFile(await ledgerDir($), project)).catch(() => '') : ''
   const key = usage ? taskKey(session, usage.startedAt) : ''
   await update($, band, b => resume({ ...EMPTY, ...b, level, details, project, session, cost: usage?.cost?.usd ?? b.cost }, csv, key))
-  return grep?.exitCode === 0 ? parseDefs(grep.stdout) : new Map()
+  scanInBackground($)
+  refreshBeads($)
 }
 
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
-    await remember($, await start($))
+    await start($)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -256,13 +312,13 @@ export const register: Register = (on, options) => {
   on('command.run', { command: ['clear', 'resume', 'branch'] }, async ($, e, next) => {
     const session = await $.session.id()
     const result = await next(e)
-    if ((await $.session.id()) !== session) await start($).then(defs => remember($, defs)).catch(() => undefined)
+    if ((await $.session.id()) !== session) await start($).catch(() => undefined)
     return result
   }).catch(($, e, next) => next(e))
 
-  // /clear starts a new task: the counters start over, the cost baseline stays.
+  // /clear starts a new task: the counters start over, the cost baseline stays, the copies there now become its baseline.
   on('session.end', async ($, e, next) => {
-    if (e.reason === 'clear') await update($, band, b => ({ ...EMPTY, ...b, ...TASK }))
+    if (e.reason === 'clear') await update($, band, b => ({ ...EMPTY, ...b, ...TASK, copies: rebase(current(b).copies) }))
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -283,6 +339,8 @@ export const register: Register = (on, options) => {
         const run = runOf(ran.text ?? '', ran.isError === true)
         await update($, band, b => ({ ...current(b), tests: withRun(current(b).tests, run) }))
       }
+      // bd update --claim, bd close: the bead in progress moved.
+      if (ran.deny === undefined && /(^|[\s;&|(])bd\s/.test(e.command)) refreshBeads($)
       return ran
     }
 
@@ -301,7 +359,6 @@ export const register: Register = (on, options) => {
     const newDefs = defsIn(file, after)
     const created = isSource(file) ? newDefs.filter(n => !oldDefs.includes(n)) : []
     const removed = oldDefs.filter(n => !newDefs.includes(n))
-    const reused = isSource(file) ? callsIn(addedLines(before, after), new Map(Object.entries(await read($, known))), newDefs) : []
     const oldTypes = typesIn(file, before)
     const types = isSource(file) ? typesIn(file, after).filter(n => !oldTypes.includes(n)) : []
     const added = shortcuts(addedLines(before, after))
@@ -312,7 +369,6 @@ export const register: Register = (on, options) => {
       const b = current(x)
       return {
         ...b,
-        reused: union(b.reused, reused),
         created: union(b.created, created),
         removed: union(b.removed, removed),
         touched: code ? union(b.touched, [file]) : b.touched,
@@ -365,7 +421,9 @@ export const register: Register = (on, options) => {
       grepByName,
       findingsJson: gitPath?.exitCode === 0 ? await $.fs.read(gitPath.stdout.trim()).catch(() => undefined) : undefined,
       irs: irFiles.length === 0 ? undefined : before.types.length > 0 ? await Promise.all(irFiles.map(f => $.fs.read(`${irDir}/${f.name}`).catch(() => ''))) : [],
+      scan: await scanCopies($).catch(() => undefined),
     }
+    refreshBeads($)
 
     const b = await update($, band, x => afterTurn(current(x), facts))
     await record($, b, options).catch(() => $.ui.status('greybeard band: could not write the task ledger'))
@@ -376,13 +434,16 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await bandHidden($))) return next(e)
     // Other mods share this slot: draw theirs below ours instead of replacing it.
-    // next(e) rejects only when nothing answers beneath (the test harness): the band still draws.
+    // next(e) resolves to the engine's own drawing even when no mod answers, so the band is always stacked: its root carries key="band".
+    // It rejects only when nothing at all answers beneath; the band still draws.
     const below = await next(e).catch(() => undefined)
 
     const b = await load($)
     const now = await $.clock.now()
     const startedAt = (await $.session.usage().catch(() => undefined))?.startedAt ?? now
-    const reuse = percent(b.reused.length, b.created.length)
+    const copies = b.copies.exact.length
+    const added = copyDelta(b.copies).added
+    const tracked = b.beads.kind === 'tracked'
     const suite = suiteOf(b.tests)
     const findings = b.findings.open.length
     const hasOpen = b.openCallers.length > 0
@@ -402,6 +463,7 @@ export const register: Register = (on, options) => {
     const review = () => run($, 'greybeard:greybeard-review')
     const audit = () => run($, 'greybeard:greybeard-audit')
     const debt = () => run($, 'greybeard:greybeard-debt')
+    const explain = () => void $.prompt.submit({ text: explainPrompt(b.beads) }).catch(() => $.ui.toast('greybeard band: could not ask about the beads'))
     const board = () => openBoard($).catch(() => $.ui.toast('greybeard band: could not open the board'))
     const copy = async () => {
       const done = await $.ui.copy({ text: markdown(snapshot(await load($), startedAt)), surface: e.surface })
@@ -416,7 +478,7 @@ export const register: Register = (on, options) => {
 
     if (!b.details) {
       return stack(
-        <Box flexDirection="row" alignItems="center" gap={2} {...sized}>
+        <Box key="band" flexDirection="row" alignItems="center" gap={2} {...sized}>
           {/* A click opens the four levels: one click, one turn, no stops on levels nobody wanted. */}
           <Button key="level" plain onPress={toggle}>
             <Text color={b.level === 'off' ? 'inactive' : 'suggestion'}>●</Text> {b.level}
@@ -431,10 +493,21 @@ export const register: Register = (on, options) => {
             </Text>
           )}
           {hasOpen && <Text color="warning">{b.openCallers.length} callers open</Text>}
-          {reuse !== undefined && <Text>{reuse}% reuse</Text>}
+          {b.copies.known && (
+            <Text color={copies > 0 ? 'warning' : 'success'}>
+              {copyCount(copies)}
+              {added.length > 0 ? ` (+${added.length} new)` : ''}
+            </Text>
+          )}
           {b.debtAdded > 0 && <Text dimColor>+{b.debtAdded} debt</Text>}
-          <Box flexGrow={1} />
-          <Text dimColor>${b.spent.toFixed(2)}</Text>
+          <Box flexGrow={1} flexShrink={1}>
+            {tracked && (
+              <Text key="bead" dimColor wrap="truncate-end">
+                {beadLine(b.beads, false)}
+              </Text>
+            )}
+          </Box>
+          {tracked && <Button key="beads" plain label="Beads" onPress={explain} />}
           <Button key="review" plain label="Review" onPress={review} />
           <Button key="audit" plain label="Audit" onPress={audit} />
           <Button key="board" plain label="Board" onPress={board} />
@@ -443,13 +516,21 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // Fixed columns, a dash until there is something to say: reuse first, then the session's own checks; spend is the meter at the end.
+    // Fixed columns, a dash until there is something to say: reuse (copies in the repo) first, then the session's own checks; spend is the meter at the end.
     // Callers and debt join only when they have something (.algebra/band.algebra.md).
     const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
     const dash = (key: string, sub: string): Col => ({ key, label: key, value: '–', sub, tone: 'muted' })
     const suiteSub = suite.kind === 'new-failures' ? suite.names.slice(0, 2).join(', ') : suite.kind === 'failing' ? 'no earlier run to compare' : suite.kind === 'stale' ? 'code changed since the last run' : suite.kind === 'passing' ? (b.created.length > 0 && !b.testEdited ? 'new logic, no test edited' : 'no new failures') : ''
     const cols: Col[] = [
-      reuse !== undefined ? { key: 'reuse', label: 'reuse', value: `${reuse}%`, sub: `${b.reused.length} used · ${b.created.length} new` } : dash('reuse', 'no new code yet'),
+      !b.copies.known
+        ? dash('reuse', 'scanning for copies')
+        : {
+            key: 'reuse',
+            label: 'reuse',
+            value: copyCount(copies),
+            sub: added[0] !== undefined ? `+${added.length} this task: ${copyLabel(added[0])}` : b.copies.exact[0] !== undefined ? copyLabel(b.copies.exact[0]) : b.copies.shapes > 0 ? `${b.copies.shapes} same-shape` : '',
+            tone: copies > 0 ? 'warning' : 'success',
+          },
       ...(b.drift.length > 0
         ? [{ key: 'model', label: 'model', value: 'IR drift', sub: `${b.drift.slice(0, 2).join(', ')} not in .algebra/`, tone: 'warning' } as const]
         : b.hasIr && b.types.length > 0
@@ -500,7 +581,7 @@ export const register: Register = (on, options) => {
 
     return stack(
       // The desktop's SVG draws its own line at the top, which would touch the buttons without the gap.
-      <Box flexDirection="column" {...sized} gap={e.surface === 'desktop' ? 1 : 0}>
+      <Box key="band" flexDirection="column" {...sized} gap={e.surface === 'desktop' ? 1 : 0}>
         <Box flexDirection="row" alignItems="center" gap={1}>
           {LEVELS.map(level => (
             <Button
@@ -511,6 +592,7 @@ export const register: Register = (on, options) => {
             />
           ))}
           <Box flexGrow={1} />
+          {tracked && <Button key="beads" plain label="Beads" onPress={explain} />}
           <Button key="copy" plain label="Copy" onPress={copy} />
           <Button key="review" plain label="Review" onPress={review} />
           <Button key="audit" plain label="Audit" onPress={audit} />
@@ -518,6 +600,11 @@ export const register: Register = (on, options) => {
           <Button key="board" plain label="Board" onPress={board} />
           <Button key="details" plain label="Compact" onPress={toggle} />
         </Box>
+        {tracked && (
+          <Text key="bead" dimColor wrap="truncate-end">
+            {beadLine(b.beads, true)}
+          </Text>
+        )}
         {metrics}
       </Box>
     )

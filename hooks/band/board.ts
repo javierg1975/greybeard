@@ -25,7 +25,7 @@ export type Task = {
   turns: number
   agentMinutes: number
   tokens: number
-  reuse: number | null
+  copies: number | null
   tests: string
   level: string
   model: string
@@ -68,7 +68,7 @@ export function tasksFrom(text: string): Task[] {
     turns: num(row, 'turns'),
     agentMinutes: num(row, 'agent_minutes'),
     tokens: num(row, 'tokens_total'),
-    reuse: opt(row, 'reuse_pct'),
+    copies: opt(row, 'copies'),
     tests: at(row, 'tests'),
     level: at(row, 'level'),
     model: at(row, 'model'),

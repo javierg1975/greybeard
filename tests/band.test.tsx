@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
+import { beadLine, beadsFrom, epicOf, explainPrompt, NO_BEADS, shortId } from '../hooks/band/beads'
 import { boardHtml, parseCsv, tasksFrom } from '../hooks/band/board'
+import { copiesOf, copyDelta, copyLabel, fnsIn, isCopySource, NO_COPIES, NO_INDEX, rebase, reindex, toReread, withScan } from '../hooks/band/copies'
 import type { Band } from '../hooks/band/types'
 import type { TurnFacts } from '../hooks/band/metrics'
 import {
@@ -9,7 +11,6 @@ import {
   afterTurn,
   openCalls,
   addedLines,
-  callsIn,
   defsIn,
   duration,
   elapsed,
@@ -19,8 +20,6 @@ import {
   mainModel,
   markdown,
   metricsSvg,
-  parseDefs,
-  percent,
   resume,
   sessionTitle,
   snapshot,
@@ -45,7 +44,7 @@ import {
 } from '../hooks/band/metrics'
 
 describe('board', () => {
-  const CSV = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,reuse_pct,reused,new,callers_open,tests,level\n' +
+  const CSV = 'key,started,project,name,cost_usd,turns,agent_minutes,tokens_total,tokens_output,copies,copies_added,copies_fixed,callers_open,tests,level\n' +
     'a-1,2026-10-15 12:00,shop,"Fix ""cart"", totals\nand tax",3.10,6,26.0,1200000,85000,83,5,1,0,14 passed,full\n' +
     'b-2,2026-10-14 09:30,shop,<script>alert(1)</script>,0.50,2,1.5,40000,900,,0,0,0,not run,lite\n'
 
@@ -54,8 +53,8 @@ describe('board', () => {
     expect(rows.length).toBe(3)
     expect(rows[1]?.[3]).toBe('Fix "cart", totals\nand tax')
     const tasks = tasksFrom(CSV)
-    expect(tasks[0]).toEqual({ started: '2026-10-15 12:00', project: 'shop', name: 'Fix "cart", totals\nand tax', cost: 3.1, turns: 6, agentMinutes: 26, tokens: 1_200_000, reuse: 83, tests: '14 passed', level: 'full', model: '', findingsOpen: null, findingsFixed: null, irDrift: null })
-    expect(tasks[1]?.reuse).toBeNull()
+    expect(tasks[0]).toEqual({ started: '2026-10-15 12:00', project: 'shop', name: 'Fix "cart", totals\nand tax', cost: 3.1, turns: 6, agentMinutes: 26, tokens: 1_200_000, copies: 83, tests: '14 passed', level: 'full', model: '', findingsOpen: null, findingsFixed: null, irDrift: null })
+    expect(tasks[1]?.copies).toBeNull()
     expect(tasksFrom('not,a,ledger\n1,2,3')).toEqual([])
     // CRLF ends a row but stays inside quotes; a quote mid-field opens a quoted part; an unclosed one runs to the end.
     expect(parseCsv('a,b\r\n"x\r\ny",\r\n\r\nq"u,o"te,"open,\nrest')).toEqual([['a', 'b'], ['x\r\ny', ''], ['qu,ote', 'open,\nrest']])
@@ -112,14 +111,14 @@ describe('metrics', () => {
 
   const BASE: Band = {
     level: 'full', model: 'claude-opus-5-5', cost: 31.9, spent: 3.1, turns: 6, turnCosts: [0.42], tokens: { input: 5000, output: 85_000, cacheRead: 1_100_000, cacheWrite: 10_000 },
-    busyMs: 1_560_000, name: 'Fix the cart | totals, again', project: 'shop', session: '4c69e3db-57a0', transcript: '', reused: ['to_cents'], created: [],
+    busyMs: 1_560_000, name: 'Fix the cart | totals, again', project: 'shop', session: '4c69e3db-57a0', transcript: '', created: [],
     removed: [], openCallers: [], tests: withRun(NO_TESTS, { failed: 0, names: [] }), touched: [], testEdited: false,
-    findings: NO_FINDINGS, types: [], drift: [], hasIr: false, debtAdded: 0, debtResolved: 0, debtAt: '', details: false,
+    findings: NO_FINDINGS, types: [], drift: [], hasIr: false, debtAdded: 0, debtResolved: 0, debtAt: '', details: false, copies: NO_COPIES, beads: NO_BEADS,
   }
 
   const FACTS: TurnFacts = {
     cost: 32.4, turns: 7, level: 'full', transcript: '/t/s1.jsonl', title: undefined, model: '', used: undefined,
-    durationMs: 1000, grepByName: {}, findingsJson: undefined, irs: undefined,
+    durationMs: 1000, grepByName: {}, findingsJson: undefined, irs: undefined, scan: undefined,
   }
 
   test('after a turn the band books its cost, time and totals, and keeps what the transcript does not name', () => {
@@ -271,12 +270,8 @@ describe('metrics', () => {
     expect(defsIn('README.md', 'def nope():')).toEqual([])
   })
 
-  test('counts calls of existing helpers, never new ones, test files or generic names', () => {
-    const known = parseDefs('utils/money.py:4:def to_cents(v):\nutils/io.py:1:def load(p):\ntests/test_x.py:1:def helper():')
-    expect([...known.keys()]).toEqual(['to_cents', 'load'])
-    const added = addedLines('x = 1', 'x = 1\ny = to_cents(p)\nz = load(f)\nw = parse_price(s)')
-    expect(added).not.toContain('x = 1')
-    expect(callsIn(added, known, ['parse_price'])).toEqual(['to_cents'])
+  test('addedLines keeps only what an edit added', () => {
+    expect(addedLines('x = 1', 'x = 1\ny = to_cents(p)')).toBe('y = to_cents(p)')
   })
 
   test('only files under the project root count, with either slash', () => {
@@ -351,12 +346,113 @@ describe('metrics', () => {
     expect(defsIn('A.scala', 'object A:\n  def email(s: String) = s\n  private def hidden = 1\n    def local = 2')).toEqual(['email', 'hidden'])
   })
 
-  test('shows the reuse share only once there is something to share, and a readable time', () => {
-    expect(percent(5, 1)).toBe(83)
-    expect(percent(0, 1)).toBeUndefined()
-    expect(percent(0, 0)).toBeUndefined()
+  test('a readable time', () => {
     expect(duration(45)).toBe('45m')
     expect(duration(210)).toBe('3h 30m')
+  })
+})
+
+describe('copies', () => {
+  // A copy as it happens: a function moved to a new home and never deleted from the old one, with a multi-line signature.
+  const DOC_CLIENT = `function buildDocClient(
+  config: Readonly<Pick<AppConfig, 'awsRegion' | 'dynamoEndpointUrl'>>,
+): DynamoDBDocumentClient {
+  const dynamoClient =
+    config.dynamoEndpointUrl !== undefined
+      ? new DynamoDBClient({ region: config.awsRegion, endpoint: config.dynamoEndpointUrl })
+      : new DynamoDBClient({ region: config.awsRegion });
+  return DynamoDBDocumentClient.from(dynamoClient);
+}
+`
+  const METRICS = `function metricsOf<M extends string>(slot: CheckInSlot<M>): readonly M[] {
+  return match(slot)
+    .with({ kind: 'expire' }, (s) => s.expiresFor)
+    .otherwise(() => []);
+}
+`
+  const files = {
+    'src/event-store.ts': fnsIn('src/event-store.ts', `import x from 'y'\n\n${DOC_CLIENT}\nexport const answer = 42\n`),
+    'src/read-model.ts': fnsIn('src/read-model.ts', `// the same client\n${DOC_CLIENT}`),
+    'src/a.ts': fnsIn('src/a.ts', METRICS),
+    'src/b.ts': fnsIn('src/b.ts', `\n\n${METRICS}`),
+  }
+
+  test('finds functions copied between files, whatever their position or a multi-line signature', () => {
+    const scan = copiesOf(files)
+    expect(scan.exact.map(copyLabel)).toEqual(['metricsOf: a.ts ≡ b.ts', 'buildDocClient: event-store.ts ≡ read-model.ts'])
+    expect(scan.exact[1]?.sites).toEqual(['src/event-store.ts:3', 'src/read-model.ts:2'])
+  })
+
+  test('order-free: the scan depends on the files, not the order they were read in', () => {
+    expect(copiesOf(Object.fromEntries(Object.entries(files).reverse()))).toEqual(copiesOf(files))
+  })
+
+  test('a renamed copy is exact when only the name differs, and a shape when the identifiers differ', () => {
+    const scala = (name: string, arg: string) => `object A:\n  def ${name}(${arg}: Kind): String =\n    ${arg} match\n      case Kind.Task => "T"\n      case Kind.Bug => "B"\n      case Kind.Epic => "E"\n      case Kind.Chore => "C"\n`
+    const renamed = copiesOf({ 'Cards.scala': fnsIn('Cards.scala', scala('kindMark', 'k')), 'Inspector.scala': fnsIn('Inspector.scala', scala('kindLetter', 'k')) })
+    expect(renamed.exact.map(copyLabel)).toEqual(['kindLetter ≡ kindMark'])
+    const reworded = copiesOf({ 'Cards.scala': fnsIn('Cards.scala', scala('kindMark', 'k')), 'Inspector.scala': fnsIn('Inspector.scala', scala('kindLetter', 'kind')) })
+    expect(reworded.exact).toEqual([])
+    // rename-free-shape: the shape hash ignores names; 6 lines is under the shape floor of 8.
+    const [a, b] = [fnsIn('Cards.scala', scala('kindMark', 'k'))[0], fnsIn('Inspector.scala', scala('kindLetter', 'kind'))[0]]
+    expect(a?.shape).toBe(b?.shape)
+    expect(reworded.shapes).toEqual([])
+  })
+
+  test('skips tests, scripts, entry points, short bodies and other languages', () => {
+    expect(['src/a.test.ts', 'tests/a.ts', 'scripts/seed.mjs', 'src/CartSpec.scala', 'cdk.out/x.js', 'a.py', 'a.go'].filter(isCopySource)).toEqual([])
+    expect(fnsIn('src/h.ts', `export const handler = async (event: unknown) => {\n${'  log(event)\n'.repeat(8)}}\n`)).toEqual([])
+    expect(fnsIn('src/s.ts', 'function id(x: number) {\n  return x\n}\n')).toEqual([])
+  })
+
+  test('first-scan-adds-nothing; later copies are the session\'s, and removed ones count as fixed', () => {
+    const before = withScan(NO_COPIES, copiesOf(files))
+    expect(copyDelta(before)).toEqual({ added: [], fixed: 0 })
+    const { ['src/b.ts']: _gone, ...rest } = files
+    const extra = { ...rest, 'src/c.ts': fnsIn('src/c.ts', DOC_CLIENT.replace('awsRegion })', 'awsRegion, maxAttempts: 3 })')), 'src/d.ts': fnsIn('src/d.ts', DOC_CLIENT.replace('awsRegion })', 'awsRegion, maxAttempts: 3 })')) }
+    const after = withScan(before, copiesOf(extra))
+    expect(copyDelta(after).added.map(copyLabel)).toEqual(['buildDocClient: c.ts ≡ d.ts'])
+    expect(copyDelta(after).fixed).toBe(1)
+    expect(copyDelta(rebase(after)).added).toEqual([])
+  })
+
+  test('incremental-equals-full: re-reading dirty and once-dirty files gives the index a full scan would', () => {
+    const full = reindex({ ...NO_INDEX, root: '/r' }, 'h1', ['src/b.ts'], files)
+    expect(toReread(full, ['src/c.ts'], ['src/a.ts', 'README.md'])).toEqual(['src/c.ts', 'src/b.ts', 'src/a.ts'])
+    // b.ts is deleted, c.ts is new: what a turn reads is merged in, a file that cannot be read leaves.
+    const turn = reindex(full, 'h2', ['src/c.ts'], { 'src/b.ts': undefined, 'src/c.ts': files['src/b.ts'] ?? [] })
+    const { ['src/b.ts']: _b, ...rest } = files
+    expect(copiesOf(turn.files)).toEqual(copiesOf({ ...rest, 'src/c.ts': files['src/b.ts'] ?? [] }))
+    expect([turn.head, turn.dirty]).toEqual(['h2', ['src/c.ts']])
+  })
+})
+
+describe('beads', () => {
+  const issue = (id: string, title: string, status: string, updated: string, parent?: string) => ({
+    id, title, status, updated_at: updated, dependencies: parent ? [{ issue_id: id, depends_on_id: parent, type: 'parent-child' }, { issue_id: id, depends_on_id: 'p-x', type: 'blocks' }] : undefined,
+  })
+  const inProgress = JSON.stringify([issue('p-old', 'Old work', 'in_progress', '2026-10-01T00:00:00Z'), issue('p-9opf.1', 'Stop PR-stack churn', 'in_progress', '2026-11-12T05:13:27Z', 'p-9opf')])
+  const ready = JSON.stringify([issue('p-ydny.2', 'Delete orphaned KMS keys', 'open', '2026-11-06T00:00:00Z', 'p-9opf')])
+  const epic = JSON.stringify([issue('p-9opf', 'Fleet cost', 'open', '2026-11-01T00:00:00Z')])
+  const children = JSON.stringify(['closed', 'closed', 'in_progress', 'open'].map((st, i) => issue(`p-9opf.${i + 1}`, 't', st, '2026-11-01T00:00:00Z', 'p-9opf')))
+
+  test('the bead in progress is the one updated last, under its epic', () => {
+    expect(epicOf(inProgress)).toBe('p-9opf')
+    const b = beadsFrom(inProgress, ready, epic, children)
+    expect(b).toEqual({ kind: 'tracked', current: { id: 'p-9opf.1', title: 'Stop PR-stack churn' }, others: 1, next: { id: 'p-ydny.2', title: 'Delete orphaned KMS keys' }, epic: { id: 'p-9opf', title: 'Fleet cost', done: 2, total: 4 } })
+    expect(beadLine(b, false)).toBe('2/4 · 9opf.1 Stop PR-stack churn +1 · next ydny.2')
+    expect(beadLine(b, true)).toBe('epic 9opf Fleet cost 2/4 · now 9opf.1 Stop PR-stack churn +1 · next ydny.2 Delete orphaned KMS keys')
+    expect(explainPrompt(b)).toContain('bd show p-9opf')
+  })
+
+  test('no bd, no database or broken JSON reads as none; nothing in progress still shows what is next', () => {
+    expect(beadsFrom(undefined, undefined, undefined, undefined)).toEqual(NO_BEADS)
+    expect(beadsFrom('Error: no beads database found', undefined, undefined, undefined)).toEqual(NO_BEADS)
+    expect(beadLine(NO_BEADS, true)).toBe('')
+    const idle = beadsFrom('[]', ready, undefined, undefined)
+    expect(beadLine(idle, false)).toBe('nothing in progress · next ydny.2')
+    expect(epicOf('[]')).toBeUndefined()
+    expect(shortId('glp1-campaign-9opf.1')).toBe('9opf.1')
   })
 })
 
@@ -408,9 +504,9 @@ test('the row takes bodyColumns only in the terminal, where a Button is as wide 
   mock.store(on)
   await each([['terminal', 100], ['vscode', undefined]] as const, async ([surface, width]) => {
     const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
-    expect((await ui.find({ type: 'Box' }))?.props.width).toBe(width)
+    expect((await ui.find({ key: 'band' }))?.props.width).toBe(width)
     await ui.press({ key: 'details' })
-    expect((await ui.find({ type: 'Box' }))?.props.width).toBe(width)
+    expect((await ui.find({ key: 'band' }))?.props.width).toBe(width)
     await ui.unmount()
   })
 })
@@ -422,7 +518,7 @@ test('the details view has its line without empty rows, and off the terminal its
     const ui = await $.ui.mount({ plugin: 'greybeard', surface, ...BAND })
     await ui.press({ key: 'details' })
     expect(await ui.find({ type: 'Text', text: /─/ })).toBeDefined()
-    expect((await ui.find({ type: 'Box' }))?.props.gap).toBe(0)
+    expect((await ui.find({ key: 'band' }))?.props.gap).toBe(0)
     // A fresh session still draws its fixed columns, each a dash until it knows something (.algebra/band.algebra.md).
     const order = ['reuse', 'regressions', 'check', 'spent']
     const keys = (await ui.findAll({ type: 'Box' })).map(box => box.props.key).filter(key => order.includes(String(key)))
@@ -438,7 +534,7 @@ test('the details view has its line without empty rows, and off the terminal its
   // The desktop keeps a gap above its SVG, whose top line would otherwise touch the buttons.
   const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'desktop', ...BAND })
   await ui.press({ key: 'details' })
-  expect((await ui.find({ type: 'Box' }))?.props.gap).toBe(1)
+  expect((await ui.find({ key: 'band' }))?.props.gap).toBe(1)
   await ui.unmount()
 })
 
@@ -741,6 +837,62 @@ test('at turn end the band reads check findings for touched files and IR drift, 
   expect(await ui.find({ type: 'Text', text: /^clean$/ })).toBeDefined()
   await ui.press({ key: 'details' })
   expect(await ui.find({ type: 'Text', text: /^in sync$/ })).toBeDefined()
+  await ui.press({ key: 'details' })
+  await ui.unmount()
+})
+
+test('the band shows the repo\'s copies and the bead in progress, and the Beads button asks about the epic', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }))
+  on('session.repo', () => ({ value: { root: '/repo' } }) as never)
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  on('session.id', () => ({ value: 's1' }))
+  on('session.turns', () => ({ value: 1 }))
+  on('session.usage', () => ({ value: { startedAt: 0, cost: { usd: 0.5 } } }) as never)
+  const body = 'function buildDocClient(region: string, endpoint: string | undefined) {\n  const client = endpoint !== undefined ? new DynamoDBClient({ region, endpoint }) : new DynamoDBClient({ region })\n  return DynamoDBDocumentClient.from(client)\n}\n'
+  const sources: Record<string, string> = { '/repo/src/a.ts': body, '/repo/src/b.ts': `// again\n${body}`, '/repo/src/c.ts': 'export const one = 1\n' }
+  const bead = (id: string, title: string, status: string, parent?: string) => ({ id, title, status, updated_at: '2026-11-12T00:00:00Z', dependencies: parent ? [{ depends_on_id: parent, type: 'parent-child' }] : [] })
+  const ran = log<string>()
+  on('process.run', ($, e) => {
+    const cmd = e.argv.join(' ')
+    ran.note(cmd)
+    const out = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
+    if (cmd.startsWith('git ls-files -co')) return out('src/a.ts\nsrc/b.ts\nsrc/c.ts\nscripts/x.mjs\n')
+    if (cmd.startsWith('git rev-parse HEAD')) return out('abc\n')
+    if (cmd.startsWith('git diff') || cmd.startsWith('git ls-files -o')) return out('')
+    if (cmd.startsWith('bd list --status')) return out(JSON.stringify([bead('p-e.1', 'Stop PR-stack churn', 'in_progress', 'p-e')]))
+    if (cmd.startsWith('bd ready')) return out(JSON.stringify([bead('p-e.2', 'Delete orphaned keys', 'open', 'p-e')]))
+    if (cmd.startsWith('bd show')) return out(JSON.stringify([bead('p-e', 'Fleet cost', 'open')]))
+    if (cmd.startsWith('bd list --parent')) return out(JSON.stringify([bead('p-e.1', 'a', 'in_progress', 'p-e'), bead('p-e.2', 'b', 'open', 'p-e'), bead('p-e.3', 'c', 'closed', 'p-e')]))
+    return { value: { exitCode: 1, stdout: '', stderr: '' } } as never
+  })
+  on('fs.read', ($, e) => { const text = sources[e.path]; return text === undefined ? ({ deny: 'missing' } as never) : { value: text } })
+  on('fs.list', () => ({ value: [] }) as never)
+  on('fs.write', () => ({ value: undefined }))
+  on('turn.complete', () => ({ text: '' }))
+  const asked = log<string>()
+  on('prompt.submit', ($, e) => {
+    asked.note(e.text)
+    return { drop: 'test' } as never
+  })
+  const ui = await $.ui.mount({ plugin: 'greybeard', surface: 'terminal', ...BAND })
+
+  await $.turn.complete({ answer: '', durationMs: 1000 } as never)
+  // Beads load in the background; the next turn end finds them written.
+  await $.turn.complete({ answer: '', durationMs: 1000 } as never)
+  expect(await ui.find({ type: 'Text', text: /^1 copy$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '1/3 · e.1 Stop PR-stack churn · next e.2' })).toBeDefined()
+  // The money counter left the compact row.
+  expect(await ui.find({ type: 'Text', text: /^\$\d/ })).toBeUndefined()
+
+  await ui.press({ key: 'details' })
+  expect(await ui.find({ type: 'Text', text: 'buildDocClient: a.ts ≡ b.ts' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^epic e Fleet cost 1\/3 · now e\.1/ })).toBeDefined()
+  await ui.press({ key: 'beads' })
+  expect(asked.seen()[0]).toContain('bd show p-e')
+  // Read-only: no bd command that writes.
+  expect(ran.seen().filter(c => c.startsWith('bd ') && !/^bd (list|ready|show) /.test(c))).toEqual([])
   await ui.press({ key: 'details' })
   await ui.unmount()
 })
