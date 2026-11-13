@@ -8,6 +8,8 @@ type Issue = { id: string; title: string; status: string; updated: string; paren
 export const NO_BEADS: Beads = { kind: 'none' }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
+// The parent id goes back to bd as an argument: a leading '-' from a tampered .beads would read as an option.
+const BEAD_ID = /^[A-Za-z0-9][\w.-]*$/
 
 // bd's --json: an array of issues (bd show too). Anything else is no answer.
 export function issuesOf(json: string | undefined): Issue[] | undefined {
@@ -19,7 +21,7 @@ export function issuesOf(json: string | undefined): Issue[] | undefined {
       const i = x as Record<string, unknown>
       const deps = Array.isArray(i.dependencies) ? (i.dependencies as Record<string, unknown>[]) : []
       const parent = deps.find(d => d?.type === 'parent-child')?.depends_on_id
-      return str(i.id) === '' ? [] : [{ id: str(i.id), title: str(i.title), status: str(i.status), updated: str(i.updated_at), parent: typeof parent === 'string' ? parent : undefined }]
+      return str(i.id) === '' ? [] : [{ id: str(i.id), title: str(i.title), status: str(i.status), updated: str(i.updated_at), parent: typeof parent === 'string' && BEAD_ID.test(parent) ? parent : undefined }]
     })
   } catch {
     return undefined
