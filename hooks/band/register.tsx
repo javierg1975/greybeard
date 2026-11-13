@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { beadLine, beadsFrom, epicOf, explainPrompt, NO_BEADS } from './beads'
+import { beadLine, beadParts, beadsFrom, epicOf, explainPrompt, NO_BEADS } from './beads'
 import { boardHtml, tasksFrom } from './board'
 import { COPY_PATHSPECS, copiesOf, copyCount, copyDelta, copyLabel, fnsIn, isCopySource, NO_COPIES, NO_INDEX, rebase, reindex, toReread, withScan } from './copies'
 import type { Band, Beads, CopyScan, Fn } from './types'
@@ -545,7 +545,7 @@ export const register: Register = (on, options) => {
         : b.touched.length === 0
           ? dash('check', 'no files touched yet')
           : findings > 0
-            ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first, tone: 'warning' }
+            ? { key: 'check', label: 'check', value: `${findings} open`, sub: b.findings.first.replace(/^\S*\//, ''), tone: 'warning' }
             : { key: 'check', label: 'check', value: 'clean', sub: b.findings.fixed > 0 ? `${b.findings.fixed} fixed` : '', tone: 'success' },
       ...(b.debtAdded > 0 || b.debtResolved > 0
         ? [{ key: 'debt', label: 'debt', value: `+${b.debtAdded} −${b.debtResolved}`, sub: b.debtAt === '' ? '' : `last added in ${b.debtAt}` }]
@@ -601,8 +601,14 @@ export const register: Register = (on, options) => {
           <Button key="details" plain label="Compact" onPress={toggle} />
         </Box>
         {tracked && (
-          <Text key="bead" dimColor wrap="truncate-end">
-            {beadLine(b.beads, true)}
+          <Text key="bead" wrap="truncate-end">
+            {beadParts(b.beads, true).map(([label, text], i) => (
+              <Text key={`part-${i}`}>
+                {i > 0 && <Text dimColor> · </Text>}
+                {label !== '' && <Text dimColor>{label} </Text>}
+                {text}
+              </Text>
+            ))}
           </Text>
         )}
         {metrics}

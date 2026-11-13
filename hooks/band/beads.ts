@@ -57,13 +57,16 @@ export const shortId = (id: string) => id.replace(/^.*-/, '')
 const fit = (s: string, max: number) => (s.length > max ? `${s.slice(0, Math.max(1, max - 1))}…` : s)
 
 // One line: "3/7 · 9opf.1 Fleet cost… +2 · next ydny.2". Long adds the titles of the epic and the next bead.
-export function beadLine(b: Beads, long: boolean): string {
-  if (b.kind === 'none') return ''
-  const epic = b.epic === undefined ? [] : [long ? `epic ${shortId(b.epic.id)} ${fit(b.epic.title, 40)} ${b.epic.done}/${b.epic.total}` : `${b.epic.done}/${b.epic.total}`]
-  const now = b.current === undefined ? ['nothing in progress'] : [`${long ? 'now ' : ''}${shortId(b.current.id)} ${fit(b.current.title, long ? 48 : 32)}${b.others > 0 ? ` +${b.others}` : ''}`]
-  const next = b.next === undefined ? [] : [`next ${shortId(b.next.id)}${long ? ` ${fit(b.next.title, 40)}` : ''}`]
-  return [...epic, ...now, ...next].join(' · ')
+// The same line as [label, text] parts, so a surface can dim the labels and keep the titles readable.
+export function beadParts(b: Beads, long: boolean): [string, string][] {
+  if (b.kind === 'none') return []
+  const epic: [string, string][] = b.epic === undefined ? [] : [long ? ['epic', `${shortId(b.epic.id)} ${fit(b.epic.title, 40)} ${b.epic.done}/${b.epic.total}`] : ['', `${b.epic.done}/${b.epic.total}`]]
+  const now: [string, string][] = b.current === undefined ? [['', 'nothing in progress']] : [[long ? 'now' : '', `${shortId(b.current.id)} ${fit(b.current.title, long ? 48 : 32)}${b.others > 0 ? ` +${b.others}` : ''}`]]
+  const next: [string, string][] = b.next === undefined ? [] : [['next', `${shortId(b.next.id)}${long ? ` ${fit(b.next.title, 40)}` : ''}`]]
+  return [...epic, ...now, ...next]
 }
+
+export const beadLine = (b: Beads, long: boolean): string => beadParts(b, long).map(([l, t]) => (l === '' ? t : `${l} ${t}`)).join(' · ')
 
 // What the Beads button asks: the model reads bd itself, so the answer is never older than the press.
 export function explainPrompt(b: Beads): string {

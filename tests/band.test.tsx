@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { beadLine, beadsFrom, epicOf, explainPrompt, NO_BEADS, shortId } from '../hooks/band/beads'
+import { beadLine, beadParts, beadsFrom, epicOf, explainPrompt, NO_BEADS, shortId } from '../hooks/band/beads'
 import { boardHtml, parseCsv, tasksFrom } from '../hooks/band/board'
 import { copiesOf, copyDelta, copyLabel, fnsIn, isCopySource, NO_COPIES, NO_INDEX, rebase, reindex, toReread, withScan } from '../hooks/band/copies'
 import type { Band } from '../hooks/band/types'
@@ -442,6 +442,7 @@ describe('beads', () => {
     expect(b).toEqual({ kind: 'tracked', current: { id: 'p-9opf.1', title: 'Stop PR-stack churn' }, others: 1, next: { id: 'p-ydny.2', title: 'Delete orphaned KMS keys' }, epic: { id: 'p-9opf', title: 'Fleet cost', done: 2, total: 4 } })
     expect(beadLine(b, false)).toBe('2/4 · 9opf.1 Stop PR-stack churn +1 · next ydny.2')
     expect(beadLine(b, true)).toBe('epic 9opf Fleet cost 2/4 · now 9opf.1 Stop PR-stack churn +1 · next ydny.2 Delete orphaned KMS keys')
+    expect(beadParts(b, true).map(([label]) => label)).toEqual(['epic', 'now', 'next'])
     expect(explainPrompt(b)).toContain('bd show p-9opf')
   })
 
